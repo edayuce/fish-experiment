@@ -1,0 +1,12 @@
+<launch>
+
+<node pkg = "rectrial" name ="camera_node"   	type= "genicam_cpp_demo" launch-prefix="taskset -c 5"/>
+<node pkg = "rectrial" name ="image_listener"   type= "my_subscriber"/>
+<node pkg = "rectrial" name ="rec_node"    	type= "rec_node"/>
+<!-- <node pkg = "rectrial" name ="uartnode"    	type= "uart_node.py"/> -->
+<node pkg = "rectrial" name ="post_init"    	type= "post_init.py"/>
+<node pkg = "rectrial" name ="maxon"    	type= "HelloEposCmd" launch-prefix="taskset -c 4"/>
+<!-- <node pkg = "rectrial" name ="ProcessedImageDisplayer"    	type= "displayer" args="processedImage 0 450"/> -->
+<!-- <node pkg = "rectrial" name ="ImageProcessor"    	type= "ImageProcessor.py"/> -->
+
+</launch>

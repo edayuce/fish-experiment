@@ -1,0 +1,34 @@
+# Ignore build and devel folders
+build/
+devel/
+
+# Ignore temporary files
+*.swp
+*~
+
+# Ignore log files
+*.log
+
+# Ignore compiled Python files
+*.pyc
+__pycache__/
+
+# Ignore other common files
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+
+# Ignore ROS-specific files
+catkin_make.cache
+CTestTestfile.cmake
+
+# Ignore compiled C++ files
+*.o
+*.so
+
+# Ignore other miscellaneous files
+*.bak
+*.orig
+*.rej
+*.

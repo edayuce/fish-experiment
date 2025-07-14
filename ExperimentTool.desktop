@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=NeuRoLab App
+Comment=NeuRoLab App v1.0
+Exec=/bin/bash "/home/hacettepeee/Desktop/.ExperimentGUI.sh"
+Icon=/home/hacettepeee/Desktop/Experiment_Materials/glade_docs/icon3.png
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=Utility;Application;

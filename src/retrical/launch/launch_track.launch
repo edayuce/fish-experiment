@@ -1,0 +1,3 @@
+<launch><node pkg = "rectrial" name ="tracker_node" type= "TM_BS_Cuda" args="/home/hacettepeee/Desktop/Experiment_Materials/Record_List/F0.2R1-Fri_Aug__6_16:44:06_2021
+.avi /home/hacettepeee/Desktop/Experiment_Materials/Record_List/Thu_Jul__1_12:19:51_2021
+.csv"/></launch>

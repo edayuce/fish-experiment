@@ -1,0 +1,9 @@
+<launch>
+
+<node pkg = "rectrial" name ="camera_node"   	type= "genicam_cpp_demo"/>
+<node pkg = "rectrial" name ="image_listener"   type= "my_subscriber"/>
+<node pkg = "rectrial" name ="rec_node"    	type= "rec_node"/>
+<node pkg = "rectrial" name ="uartnode"    	type= "uart_node.py"/>
+<node pkg = "rectrial" name ="projector_node"   type= "projector_node.py"/>
+
+</launch>
