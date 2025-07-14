@@ -1,7 +1,7 @@
 #ifndef _GLWINDOW_H_
 #define _GLWINDOW_H_
 // Requires SDL2 and GL 3.0
-#include "glad/glad.h"
+#include "gl/include/glad/glad.h"
 #include "SDL2/SDL.h"
 #include <string>
 #include <map>
