@@ -301,7 +301,7 @@ void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, co
     processed_msg.data_e = std::to_string(current_offset_.x) + "," + std::to_string(current_offset_.y);
     
     // Also populate the specific fields if they are used by other nodes
-    processed_msg.target_pos_x = std::to_string(current_offset_.x);
+    processed_msg.target_pos_x = current_offset_.x;
     // processed_msg.target_pos_y = std::to_string(current_offset_.y); // Assuming this field exists
 
     processed_msg.finish_c = experiment_msg.finish_c;

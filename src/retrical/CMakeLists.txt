@@ -25,7 +25,8 @@ find_package(OpenCV REQUIRED)
 
 # Find Pylon for Basler Camera
 # This assumes the Pylon SDK is installed in a standard location.
-find_package(Pylon REQUIRED)
+# find_package(Pylon REQUIRED)
+set(Pylon_INCLUDE_DIRS /opt/pylon/include)
 
 
 # ===================================================================
@@ -68,8 +69,7 @@ include_directories(
 # ===================================================================
 # Build Libraries & Executables
 # ===================================================================
-# NOTE: All C++ source files (.cpp) should be in a 'src' folder,
-# not a 'scripts' folder. The paths below have been corrected.
+
 
 # --- Libraries ---
 add_library(GlWindow STATIC
@@ -80,13 +80,33 @@ add_library(GlWindow STATIC
 target_include_directories(GlWindow PUBLIC scripts/gl/include)
 
 
+add_library(Epos STATIC
+  scripts/epos_lib/epos_lib.cpp
+)
+target_include_directories(Epos PUBLIC 
+  scripts/epos_lib
+  scripts
+)
+
+
 # --- Executables ---
 add_executable(genicam_cpp_demo      scripts/camera_node.cpp)
 add_executable(experiment_controller scripts/experiment_controller.cpp)
 add_executable(rec_node              scripts/rec_node.cpp)
 add_executable(HelloEposCmd          scripts/HelloEposCmd.cpp)
 add_executable(real_time_tracker     scripts/real_time_tracker.cpp)
+target_link_libraries(real_time_tracker
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
 add_executable(main_node             scripts/main_node.cpp)
+target_link_libraries(main_node
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  GlWindow
+  SDL2
+  dl
+)
 
 
 
@@ -95,11 +115,16 @@ add_executable(main_node             scripts/main_node.cpp)
 # ===================================================================
 # Link libraries to their corresponding executables
 
+link_directories(/opt/pylon/lib)
+
 # Link Basler camera node
 target_link_libraries(genicam_cpp_demo
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  ${Pylon_LIBRARIES}
+  /opt/pylon/lib/libpylonbase.so
+  /opt/pylon/lib/libpylonutility.so
+  /opt/pylon/lib/libpylonc.so
+  /opt/pylon/lib/libGCBase_gcc_v3_1_Basler_pylon.so
 )
 
 # Link other nodes
@@ -112,13 +137,17 @@ target_link_libraries(experiment_controller
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   GlWindow
+  dl
+  SDL2
   # You may need to add -lJetsonGPIO here if you are on a Jetson
 )
 
 target_link_libraries(HelloEposCmd
   ${catkin_LIBRARIES}
-  # You need to ensure the EposCmd library is found and linked, for example:
-  # -lEposCmd
+  Epos
+  EposCmd
+  dl
+  rt
 )
 
 

@@ -133,7 +133,7 @@
           </packing>
         </child>
         <child>
-          <object class="GtkComboBox" id="csv_selector">
+          <object class="GtkComboBox" id="mode_config">
             <property name="width_request">120</property>
             <property name="height_request">40</property>
             <property name="visible">True</property>
@@ -185,6 +185,121 @@
           <packing>
             <property name="x">165</property>
             <property name="y">142</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkEntry" id="freq_config">
+            <property name="width_request">100</property>
+            <property name="height_request">30</property>
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="text" translatable="yes">0.20</property>
+          </object>
+          <packing>
+            <property name="x">10</property>
+            <property name="y">190</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkButton" id="set_freq">
+            <property name="label" translatable="yes">Set Frequency</property>
+            <property name="width_request">100</property>
+            <property name="height_request">30</property>
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="receives_default">True</property>
+          </object>
+          <packing>
+            <property name="x">120</property>
+            <property name="y">190</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="sum_of_sines">
+            <property name="label" translatable="yes">Sum of Sines</property>
+            <property name="width_request">100</property>
+            <property name="height_request">30</property>
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="receives_default">False</property>
+            <property name="draw_indicator">True</property>
+          </object>
+          <packing>
+            <property name="x">10</property>
+            <property name="y">230</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="open_loop">
+            <property name="label" translatable="yes">Open Loop</property>
+            <property name="width_request">100</property>
+            <property name="height_request">30</property>
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="receives_default">False</property>
+            <property name="draw_indicator">True</property>
+          </object>
+          <packing>
+            <property name="x">120</property>
+            <property name="y">230</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="closed_loop">
+            <property name="label" translatable="yes">Closed Loop</property>
+            <property name="width_request">100</property>
+            <property name="height_request">30</property>
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="receives_default">False</property>
+            <property name="draw_indicator">True</property>
+          </object>
+          <packing>
+            <property name="x">10</property>
+            <property name="y">270</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkEntry" id="gain_config">
+            <property name="width_request">100</property>
+            <property name="height_request">30</property>
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="text" translatable="yes">1.0</property>
+          </object>
+          <packing>
+            <property name="x">120</property>
+            <property name="y">270</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="gain_check">
+            <property name="label" translatable="yes">Set Gain</property>
+            <property name="width_request">100</property>
+            <property name="height_request">30</property>
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="receives_default">False</property>
+            <property name="draw_indicator">True</property>
+          </object>
+          <packing>
+            <property name="x">10</property>
+            <property name="y">310</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="openloop_gain">
+            <property name="label" translatable="yes">Open Loop Gain</property>
+            <property name="width_request">120</property>
+            <property name="height_request">30</property>
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="receives_default">False</property>
+            <property name="draw_indicator">True</property>
+          </object>
+          <packing>
+            <property name="x">120</property>
+            <property name="y">310</property>
           </packing>
         </child>
       </object>

@@ -8,7 +8,7 @@
 #include <opencv2/opencv.hpp>
 
 // Include the Pylon API
-#include <../include/pylon/PylonIncludes.h>
+#include <pylon/PylonIncludes.h>
 
 // Include your custom message header
 #include <rectrial/pub_data.h>

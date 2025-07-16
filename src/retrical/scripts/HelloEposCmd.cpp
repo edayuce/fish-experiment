@@ -579,7 +579,7 @@ void imageCallback(const rectrial::pub_data::ConstPtr& msg){
 	//if(//TODO){ targetposition = A_pos*std::atof(msg->target_pos.data); }
 
 	if(GainMode && !OpenLoop && !sumofsines && !ClosedLoop){
-		pos_x = -reafferentGain*atof(msg->target_pos_x.c_str())/29.55;
+		  pos_x = -reafferentGain*msg->target_pos_x/29.55;
 		if(pos_x>=limit){
 			pos_x=limit;
 
@@ -598,7 +598,7 @@ void imageCallback(const rectrial::pub_data::ConstPtr& msg){
 
 	if(GainMode && OpenLoop && !sumofsines && !ClosedLoop)
 	{
-		pos_x = -reafferentGain*atof(msg->target_pos_x.c_str())/29.55;
+		  pos_x = -reafferentGain*msg->target_pos_x/29.55;
 		if(pos_x>=limit){
 			pos_x=limit;
 
@@ -622,7 +622,7 @@ void imageCallback(const rectrial::pub_data::ConstPtr& msg){
 	}
 
 	if(ClosedLoop ){
-		pos_x = -reafferentGain*atof(msg->target_pos_x.c_str())/29.55;
+		  pos_x = -reafferentGain*msg->target_pos_x/29.55;
 		ROS_INFO("2222 %f", pos_x);
 		if(pos_x>=limit){
 			pos_x=limit;
