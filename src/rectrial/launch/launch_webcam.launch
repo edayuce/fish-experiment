@@ -1,6 +1,6 @@
 <launch>
 
-<node pkg = "rectrial" name ="camera_node"   	type= "genicam_cpp_demo" />
-<node pkg = "rectrial" name ="image_listener"   type= "my_subscriber"/>
+<node pkg = "rectrial" name ="basler_camera_node"   	type= "basler_camera_node" />
+<node pkg = "rectrial" name ="experiment_controler_node"   type= "experiment_controller"/>
 
 </launch>

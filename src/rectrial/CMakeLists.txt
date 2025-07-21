@@ -96,7 +96,7 @@ target_include_directories(Epos PUBLIC
 
 
 # --- Executables ---
-add_executable(camera_node              scripts/camera_node.cpp)
+add_executable(basler_camera_node       scripts/camera_node.cpp)
 add_executable(experiment_controller    scripts/experiment_controller.cpp)
 add_executable(rec_node                 scripts/rec_node.cpp)
 add_executable(maxon                    scripts/HelloEposCmd.cpp)
@@ -124,7 +124,7 @@ target_link_libraries(main_node
 link_directories(/opt/pylon/lib)
 
 # Link Basler camera node
-target_link_libraries(camera_node
+target_link_libraries(basler_camera_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   /opt/pylon/lib/libpylonbase.so
@@ -162,7 +162,7 @@ target_link_libraries(maxon
 # Dependencies
 # ===================================================================
 # Ensure messages are generated before nodes that use them are built
-add_dependencies(camera_node           ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(basler_camera_node    ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(experiment_controller ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(rec_node              ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(maxon                 ${PROJECT_NAME}_generate_messages_cpp)
