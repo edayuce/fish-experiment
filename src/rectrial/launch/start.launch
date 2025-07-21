@@ -1,0 +1,4 @@
+<launch>
+    <include file="$(find rectrial)/launch/launch_gui.launch" />
+    <include file="$(find rectrial)/launch/launch_pub.launch" />
+</launch>

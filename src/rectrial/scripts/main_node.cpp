@@ -1,8 +1,8 @@
+#include <boost/make_shared.hpp>
 #include <ros/ros.h>
 #include <ros/package.h> // For finding package paths
 #include <std_msgs/String.h>
 #include <cv_bridge/cv_bridge.h>
-#include <image_transport/image_transport.h>
 #include <sensor_msgs/image_encodings.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/tracking.hpp>
@@ -58,7 +58,7 @@ public:
 
 private:
     // Callbacks
-    void imageCallback(const sensor_msgs::ImageConstPtr& msg);
+    void imageCallback(const rectrial::pub_data::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
 
     // Core Logic
@@ -75,7 +75,7 @@ private:
     // ROS Communication
     ros::Publisher experiment_pub_;
     ros::Publisher processed_pub_;
-    image_transport::Subscriber image_sub_;
+    ros::Subscriber image_sub_;
     ros::Subscriber state_sub_;
 
     // State Management
@@ -112,8 +112,7 @@ TrackerNode::TrackerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     experiment_pub_ = nh_.advertise<rectrial::pub_data>("start_experiment", 10);
     processed_pub_ = nh_.advertise<rectrial::pub_data>("imager_processed", 10);
     
-    image_transport::ImageTransport it(nh_);
-    image_sub_ = it.subscribe("/imager_c", 1, &TrackerNode::imageCallback, this);
+    image_sub_ = nh_.subscribe("/imager_c", 1, &TrackerNode::imageCallback, this);
     state_sub_ = nh_.subscribe("set_state", 10, &TrackerNode::stateCallback, this);
 
     // --- 3. Load CSV data ---
@@ -156,21 +155,23 @@ TrackerNode::~TrackerNode()
     cv::destroyAllWindows();
 }
 
-void TrackerNode::imageCallback(const sensor_msgs::ImageConstPtr& msg)
+void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
 {
     try
     {
-        // Convert ROS image to OpenCV Mat
-        cv::Mat frame = cv_bridge::toCvShare(msg, "mono8")->image;
+        // Convert ROS image from the custom message to OpenCV Mat
+        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_e, sensor_msgs::image_encodings::MONO8);
+        cv::Mat frame = cv_ptr->image;
+
         if (frame.empty()) {
-            ROS_WARN("Received an empty image frame.");
+            ROS_WARN("Received an empty image frame in callback.");
             return;
         }
         processImage(frame.clone()); // Use a clone to avoid modifying the original
     }
     catch (const cv_bridge::Exception& e)
     {
-        ROS_ERROR("cv_bridge exception: %s", e.what());
+        ROS_ERROR("cv_bridge exception in callback: %s", e.what());
     }
 }
 
@@ -344,14 +345,17 @@ std::string TrackerNode::getCurrentTimestamp()
 void TrackerNode::spin()
 {
     ros::Rate rate(30); // Control the loop rate to 30 Hz
-    sensor_msgs::ImageConstPtr last_image_msg;
+    rectrial::pub_data::ConstPtr last_custom_msg;
 
     while (ros::ok())
     {
         // Get the latest image message that the callback has received
-        last_image_msg = ros::topic::waitForMessage<sensor_msgs::Image>("/imager_c", nh_, ros::Duration(1.0));
+        last_custom_msg = ros::topic::waitForMessage<rectrial::pub_data>("/imager_c", nh_, ros::Duration(1.0));
 
-        if (last_image_msg) {
+        if (last_custom_msg) {
+            // Create a shared_ptr to the image part of the message to pass to other functions
+            sensor_msgs::ImageConstPtr last_image_msg = boost::make_shared<const sensor_msgs::Image>(last_custom_msg->image_e);
+
             // Convert and process the image to update state and visuals
             try {
                 cv::Mat frame = cv_bridge::toCvShare(last_image_msg, "mono8")->image;

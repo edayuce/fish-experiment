@@ -53,6 +53,12 @@ catkin_package(
   CATKIN_DEPENDS roscpp rospy std_msgs message_runtime sensor_msgs image_transport cv_bridge
 )
 
+catkin_install_python(PROGRAMS
+  scripts/my_gui.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+
 
 # ===================================================================
 # Include Directories
@@ -90,11 +96,11 @@ target_include_directories(Epos PUBLIC
 
 
 # --- Executables ---
-add_executable(genicam_cpp_demo      scripts/camera_node.cpp)
-add_executable(experiment_controller scripts/experiment_controller.cpp)
-add_executable(rec_node              scripts/rec_node.cpp)
-add_executable(HelloEposCmd          scripts/HelloEposCmd.cpp)
-add_executable(real_time_tracker     scripts/real_time_tracker.cpp)
+add_executable(camera_node              scripts/camera_node.cpp)
+add_executable(experiment_controller    scripts/experiment_controller.cpp)
+add_executable(rec_node                 scripts/rec_node.cpp)
+add_executable(maxon                    scripts/HelloEposCmd.cpp)
+add_executable(real_time_tracker        scripts/real_time_tracker.cpp)
 target_link_libraries(real_time_tracker
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
@@ -118,7 +124,7 @@ target_link_libraries(main_node
 link_directories(/opt/pylon/lib)
 
 # Link Basler camera node
-target_link_libraries(genicam_cpp_demo
+target_link_libraries(camera_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   /opt/pylon/lib/libpylonbase.so
@@ -142,7 +148,7 @@ target_link_libraries(experiment_controller
   # You may need to add -lJetsonGPIO here if you are on a Jetson
 )
 
-target_link_libraries(HelloEposCmd
+target_link_libraries(maxon
   ${catkin_LIBRARIES}
   Epos
   EposCmd
@@ -156,9 +162,9 @@ target_link_libraries(HelloEposCmd
 # Dependencies
 # ===================================================================
 # Ensure messages are generated before nodes that use them are built
-add_dependencies(genicam_cpp_demo      ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(camera_node           ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(experiment_controller ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(rec_node              ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(HelloEposCmd          ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(maxon                 ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(main_node             ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(real_time_tracker     ${PROJECT_NAME}_generate_messages_cpp)

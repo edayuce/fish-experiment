@@ -255,11 +255,11 @@ class MyApp (object):
         self.writeData(buffer,blockPopup = True)
     
     def dic_set (self,widget):
-        f = open("/home/"+self.username+"/fish-experiment/src/retrical/launch/launch_track.launch", "w")
+        f = open("/home/"+self.username+"/fish-experiment/src/rectrial/launch/launch_track.launch", "w")
         self.path = str(widget.get_filename())
         st_index = int(self.path.rindex(".avi"))
         self.csvPath = self.path[0:st_index]
-        f.write('<launch><node pkg = "retrical" name ="tracker_node" type= "TM_BS_Cuda_deneme" args="'+  self.path + ' ' + self.csvPath + '.csv' + ' ' + self.fish_obj +'"/></launch>')
+        f.write('<launch><node pkg = "rectrial" name ="tracker_node" type= "TM_BS_Cuda_deneme" args="'+  self.path + ' ' + self.csvPath + '.csv' + ' ' + self.fish_obj +'"/></launch>')
         f.close()
     
     def start_track(self, widget):
@@ -270,7 +270,7 @@ class MyApp (object):
         
         self.uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
         roslaunch.configure_logging(self.uuid)
-        self.launch = roslaunch.parent.ROSLaunchParent(self.uuid, ["/home/"+self.username+"/fish-experiment/src/retrical/launch/launch_track.launch"])
+        self.launch = roslaunch.parent.ROSLaunchParent(self.uuid, ["/home/"+self.username+"/fish-experiment/src/rectrial/launch/launch_track.launch"])
         self.launch.start()
 
     def kill_track(self, widget):
@@ -287,7 +287,7 @@ class MyApp (object):
             pass
         self.uuid1 = roslaunch.rlutil.get_or_generate_uuid(None, False)
         roslaunch.configure_logging(self.uuid1)
-        self.launch_cam= roslaunch.parent.ROSLaunchParent(self.uuid1, ["/home/"+self.username+"/fish-experiment/src/retrical/launch/launch_pub.launch"])
+        self.launch_cam= roslaunch.parent.ROSLaunchParent(self.uuid1, ["/home/"+self.username+"/fish-experiment/src/rectrial/launch/launch_pub.launch"])
         self.launch_cam.start()
         time.sleep(2)
         ## Set Motor Freq by Default
@@ -305,7 +305,7 @@ class MyApp (object):
     def webcamOnly(self,widget):
         self.uuid1 = roslaunch.rlutil.get_or_generate_uuid(None, False)
         roslaunch.configure_logging(self.uuid1)
-        self.launch_cam= roslaunch.parent.ROSLaunchParent(self.uuid1, ["/home/"+self.username+"/fish-experiment/src/retrical/launch/launch_webcam.launch"])
+        self.launch_cam= roslaunch.parent.ROSLaunchParent(self.uuid1, ["/home/"+self.username+"/fish-experiment/src/rectrial/launch/launch_webcam.launch"])
         self.launch_cam.start()
         rospy.loginfo("Nodes are running")
 

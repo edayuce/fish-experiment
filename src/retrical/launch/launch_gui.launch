@@ -1,4 +1,0 @@
-<launch>
-    <node pkg="retrical" type="my_gui.py" name="my_gui" output="screen">
-    </node>
-</launch>
