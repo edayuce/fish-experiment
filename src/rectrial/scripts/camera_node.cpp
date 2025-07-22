@@ -62,7 +62,7 @@ private:
 
                 // 2. Populate the data field (data_e) with a high-resolution timestamp
                 auto nanosec_since_epoch = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                msg.data_e = std::to_string(nanosec_since_epoch);
+                msg.data_e = std::to_string(nanosec_since_epoch);      
 
                 // The other fields (finish_c, video_name_p, image_e) are left empty,
                 // as they are intended to be filled by downstream nodes.
@@ -109,9 +109,14 @@ BaslerCameraNode::BaslerCameraNode(ros::NodeHandle& nh)
         // Publish the custom message to the '/imager_c' topic
         data_pub_ = nh_.advertise<rectrial::pub_data>("/imager_c", 10);
 
-        // --- Create and Open Camera ---
+        // --- Create and Camera ---
         camera_.Attach(CTlFactory::GetInstance().CreateFirstDevice());
         ROS_INFO("Using device: %s", camera_.GetDeviceInfo().GetModelName().c_str());
+        
+        // --- Register Event Handler ---
+        camera_.RegisterImageEventHandler(new ImageEventHandler(this), RegistrationMode_ReplaceAll, Cleanup_Delete);
+
+        // Open Camera
         camera_.Open();
 
         // --- Configure Camera ---
@@ -119,12 +124,9 @@ BaslerCameraNode::BaslerCameraNode(ros::NodeHandle& nh)
         CEnumParameter(nodemap, "TriggerSelector").SetValue("FrameStart");
         CEnumParameter(nodemap, "TriggerMode").SetValue("Off"); // 'Off' for continuous/freerun
         CEnumParameter(nodemap, "AcquisitionMode").SetValue("Continuous");
-        
-        // --- Register Event Handler ---
-        camera_.RegisterImageEventHandler(new ImageEventHandler(this), RegistrationMode_ReplaceAll, Cleanup_Delete);
 
         // --- Start Grabbing ---
-        camera_.StartGrabbing(GrabStrategy_LatestImageOnly);
+        camera_.StartGrabbing(GrabStrategy_LatestImageOnly, GrabLoop_ProvidedByInstantCamera);
         ROS_INFO("Camera is now grabbing continuously and publishing to /imager_c.");
     }
     catch (const GenericException& e)

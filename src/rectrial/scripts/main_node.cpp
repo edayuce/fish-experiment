@@ -160,7 +160,7 @@ void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
     try
     {
         // Convert ROS image from the custom message to OpenCV Mat
-        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_e, sensor_msgs::image_encodings::MONO8);
+        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_p, sensor_msgs::image_encodings::MONO8);
         cv::Mat frame = cv_ptr->image;
 
         if (frame.empty()) {
@@ -285,7 +285,7 @@ void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, co
     rectrial::pub_data experiment_msg;
     experiment_msg.video_name_p = experiment_id_;
     experiment_msg.data_e = csv_lines_[csv_index_];
-    experiment_msg.image_e = *original_msg; // Pass original image
+    experiment_msg.image_p = *original_msg; // Pass original image
     
     if (csv_index_ == 0) {
         experiment_msg.finish_c = "start";
@@ -354,7 +354,7 @@ void TrackerNode::spin()
 
         if (last_custom_msg) {
             // Create a shared_ptr to the image part of the message to pass to other functions
-            sensor_msgs::ImageConstPtr last_image_msg = boost::make_shared<const sensor_msgs::Image>(last_custom_msg->image_e);
+            sensor_msgs::ImageConstPtr last_image_msg = boost::make_shared<const sensor_msgs::Image>(last_custom_msg->image_p);
 
             // Convert and process the image to update state and visuals
             try {
