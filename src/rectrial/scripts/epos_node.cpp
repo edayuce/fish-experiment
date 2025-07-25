@@ -82,7 +82,7 @@ private:
     bool is_open_loop_ = false;
     bool is_closed_loop_ = false;
     bool is_gain_mode_ = false;
-    bool is_sum_of_sines_ = true; // Default state
+    bool is_sum_of_sines_ = false; // Default state
 
     // --- Kinematic & Gain Parameters ---
     double reafferent_gain_ = 0.0;

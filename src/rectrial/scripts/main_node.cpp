@@ -20,6 +20,7 @@
 #include <iostream>
 #include <chrono>
 #include <iomanip> // For formatting time
+#include <mutex>
 
 // Use a namespace to avoid polluting the global scope
 namespace FishTracker
@@ -101,9 +102,10 @@ private:
     GLWindow* gl_window_ = nullptr;
     const std::string SELECTION_WINDOW_NAME = "Select Object to Track";
 
-    cv::Mat latest_frame_;
     std::mutex frame_mutex_;
+    rectrial::pub_data::ConstPtr latest_msg_;
     bool new_frame_available_ = false;
+
 };
 
 TrackerNode::TrackerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
@@ -161,7 +163,7 @@ TrackerNode::~TrackerNode()
     cv::destroyAllWindows();
 }
 
-void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
+/* void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
 {
     try
     {
@@ -179,6 +181,31 @@ void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
     {
         ROS_ERROR("cv_bridge exception in callback: %s", e.what());
     }
+} */
+
+/* void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
+{
+    try
+    {
+        // This is the only place we convert the message to a CV Mat
+        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_p, sensor_msgs::image_encodings::MONO8);
+        
+        // Use a lock to safely write to the shared frame variable
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        latest_frame_ = cv_ptr->image.clone();
+        new_frame_available_ = true;
+    }
+    catch (const cv_bridge::Exception& e)
+    {
+        ROS_ERROR("cv_bridge exception in callback: %s", e.what());
+    }
+} */
+
+void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
+{
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    latest_msg_ = msg;
+    new_frame_available_ = true;
 }
 
 void TrackerNode::processImage(const cv::Mat& frame)
@@ -355,7 +382,7 @@ std::string TrackerNode::getCurrentTimestamp()
     return ss.str();
 }
 
-void TrackerNode::spin()
+/* void TrackerNode::spin()
 {
     ros::Rate rate(25); // Control the loop rate to 25 Hz
     rectrial::pub_data::ConstPtr last_custom_msg;
@@ -369,12 +396,7 @@ void TrackerNode::spin()
         // =========================================================
 
         // Get the latest image message that the callback has received
-        //last_custom_msg = ros::topic::waitForMessage<rectrial::pub_data>("/imager_c", nh_, ros::Duration(1.0));
-        {
-            std::lock_guard<std::mutex> lock(frame_mutex_);
-            latest_frame_ = frame.clone(); // Already done
-            new_frame_available_ = true;
-        }
+        last_custom_msg = ros::topic::waitForMessage<rectrial::pub_data>("/imager_c", nh_, ros::Duration(1.0));
 
         if (last_custom_msg) {
             // Create a shared_ptr to the image part of the message to pass to other functions
@@ -432,6 +454,91 @@ void TrackerNode::spin()
         // 3. Print the processing time to the console
         ROS_INFO("Frame processed in: %ld ms", duration_ms);
         // =========================================================
+
+        rate.sleep();
+    }
+} */
+
+
+void TrackerNode::spin()
+{
+    ros::Rate rate(25); // Target 40 ms / 25 Hz
+
+    while (ros::ok())
+    {
+        auto start_time = std::chrono::steady_clock::now();
+
+        rectrial::pub_data::ConstPtr msg_to_process;
+        bool frame_to_process = false;
+
+        // Safely check for and retrieve the new message
+        {
+            std::lock_guard<std::mutex> lock(frame_mutex_);
+            if (new_frame_available_)
+            {
+                msg_to_process = latest_msg_;
+                frame_to_process = true;
+                new_frame_available_ = false; // Reset the flag, we've consumed the message
+            }
+        }
+
+        // Only do work if we actually got a new message
+        if (frame_to_process)
+        {
+            try
+            {
+                // 1. Convert image for processing
+                sensor_msgs::ImageConstPtr image_ptr = boost::make_shared<sensor_msgs::Image>(msg_to_process->image_p);
+                cv::Mat frame = cv_bridge::toCvShare(image_ptr, "mono8")->image.clone();
+                
+
+                // 2. Process the image (update visuals, tracking state)
+                processImage(frame);
+
+                // 3. If tracking, publish data to the motor
+                if (state_ == NodeState::TRACKING)
+                {
+                    // Pass the necessary parts of the original message and the processed frame
+                    sensor_msgs::ImageConstPtr original_image_msg =
+                        boost::make_shared<const sensor_msgs::Image>(msg_to_process->image_p);
+
+                    publishData(original_image_msg, frame);
+                }
+            }
+            catch (const cv_bridge::Exception& e)
+            {
+                ROS_ERROR("cv_bridge exception in main loop: %s", e.what());
+            }
+        }
+
+        // Handle SDL keyboard input
+        SDL_Event sdl_event;
+        while (SDL_PollEvent(&sdl_event))
+        {
+            // ... (Your existing spacebar and window event logic here) ...
+            if (sdl_event.type == SDL_KEYUP && sdl_event.key.keysym.scancode == SDL_SCANCODE_SPACE)
+            {
+                if (state_ == NodeState::WAITING_FOR_START) {
+                    ROS_INFO("Spacebar pressed. Starting experiment.");
+                    state_ = NodeState::TRACKING;
+                    csv_index_ = 0;
+                    experiment_id_ = getCurrentTimestamp();
+                } else if (state_ == NodeState::EXPERIMENT_DONE) {
+                    ROS_INFO("Spacebar pressed. Restarting.");
+                    state_ = NodeState::WAITING_FOR_START;
+                }
+            }
+            else if (gl_window_ && sdl_event.type == SDL_WINDOWEVENT && SDL_GetWindowFromID(sdl_event.window.windowID) == gl_window_->window)
+            {
+                gl_window_->processEvent(sdl_event);
+            }
+        }
+
+        ros::spinOnce(); // Process callbacks to receive new images
+
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        ROS_INFO("Loop iteration time: %ld ms", duration_ms);
 
         rate.sleep();
     }
