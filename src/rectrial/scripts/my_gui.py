@@ -7,12 +7,11 @@ import roslaunch
 import rospy
 from std_msgs.msg import String
 gi.require_version("Gtk", "3.0")
+
 from gi.repository import Gtk as gtk
 import numpy as np
 import os
 import smbus
-
-import PySimpleGUI as sg
 from screeninfo import get_monitors
 
 
@@ -221,12 +220,23 @@ class MyApp (object):
 
     def writeData(self, value, blockPopup = False):
         try:
-            byteValue = self.StringToBytes(value)    
+            byteValue = self.StringToBytes(value)
             #self.arduino_bus.write_i2c_block_data(self.arduino_address,0x00,byteValue)
             return True
         except:
             if not blockPopup:
-                sg.Popup('Opps!', 'Arduino is not connected!','Please turn on the Red Button! Then, try again!')
+                dialog = gtk.MessageDialog(
+                    transient_for=self.window,
+                    flags=0,
+                    message_type=gtk.MessageType.ERROR,
+                    buttons=gtk.ButtonsType.CANCEL,
+                    text="Opps! Arduino is not connected!",
+                )
+                dialog.format_secondary_text(
+                    "Please turn on the Red Button! Then, try again!"
+                )
+                dialog.run()
+                dialog.destroy()
             return False
     
     def set_motor_frequency(self,widget):

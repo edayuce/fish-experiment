@@ -5,6 +5,8 @@
 #include <sensor_msgs/image_encodings.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/tracking.hpp>
+//#include <opencv2/highgui/highgui.hpp>
+
 
 // Include your custom message header
 #include <rectrial/pub_data.h>
@@ -176,7 +178,7 @@ void OnlineTrackerNode::initializeTracker(const cv::Mat& frame)
 {
     state_ = NodeState::SELECTING_ROI;
 
-    cv::namedWindow(SELECTION_WINDOW_NAME_);
+    cv::namedWindow(SELECTION_WINDOW_NAME_, cv::WINDOW_NORMAL | cv::WINDOW_GUI_EXPANDED);
     MouseParams mouse_params;
     cv::setMouseCallback(SELECTION_WINDOW_NAME_, onMouse, &mouse_params);
 
@@ -226,6 +228,8 @@ void OnlineTrackerNode::stateCallback(const std_msgs::String::ConstPtr& msg)
 
 int main(int argc, char** argv)
 {
+    std::cout << cv::getBuildInformation() << std::endl;
+
     ros::init(argc, argv, "real_time_tracker_node");
     ros::NodeHandle nh("~"); // Use private node handle for parameters
 

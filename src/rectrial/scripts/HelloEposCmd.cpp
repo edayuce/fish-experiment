@@ -454,7 +454,7 @@ void imageCallback(const rectrial::pub_data::ConstPtr& msg){
 
 	totalFrameNumber++;
 
-	ROS_INFO("1111");
+	ROS_INFO("Callback function in HelloEposCmd");
 
 	if(msg->finish_c=="start"){
 		beginSelf = std::chrono::steady_clock::now();

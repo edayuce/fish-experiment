@@ -1,6 +1,7 @@
 # Ignore build and devel folders
 build/
 devel/
+deps/
 
 # Ignore temporary files
 *.swp

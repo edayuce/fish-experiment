@@ -21,12 +21,14 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 # Find OpenCV
-find_package(OpenCV REQUIRED)
+#find_package(OpenCV REQUIRED)
 
 # Find Pylon for Basler Camera
 # This assumes the Pylon SDK is installed in a standard location.
 # find_package(Pylon REQUIRED)
 set(Pylon_INCLUDE_DIRS /opt/pylon/include)
+set(OpenCV_DIR "$ENV{HOME}/fish-experiment/deps/opencv/lib/cmake/opencv4")
+
 
 
 # ===================================================================
@@ -99,7 +101,7 @@ target_include_directories(Epos PUBLIC
 add_executable(basler_camera_node       scripts/camera_node.cpp)
 add_executable(experiment_controller    scripts/experiment_controller.cpp)
 add_executable(rec_node                 scripts/rec_node.cpp)
-add_executable(maxon                    scripts/HelloEposCmd.cpp)
+add_executable(epos_node                scripts/epos_node.cpp)
 add_executable(real_time_tracker        scripts/real_time_tracker.cpp)
 target_link_libraries(real_time_tracker
   ${catkin_LIBRARIES}
@@ -148,7 +150,7 @@ target_link_libraries(experiment_controller
   # You may need to add -lJetsonGPIO here if you are on a Jetson
 )
 
-target_link_libraries(maxon
+target_link_libraries(epos_node
   ${catkin_LIBRARIES}
   Epos
   EposCmd
@@ -165,6 +167,6 @@ target_link_libraries(maxon
 add_dependencies(basler_camera_node    ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(experiment_controller ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(rec_node              ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(maxon                 ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(epos_node             ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(main_node             ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(real_time_tracker     ${PROJECT_NAME}_generate_messages_cpp)

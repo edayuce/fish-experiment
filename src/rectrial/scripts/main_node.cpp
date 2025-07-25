@@ -6,6 +6,8 @@
 #include <sensor_msgs/image_encodings.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/tracking.hpp>
+#include <opencv2/highgui/highgui.hpp>
+
 
 // Custom message - ensure this path is correct
 #include <rectrial/pub_data.h>
@@ -98,6 +100,10 @@ private:
     // Display
     GLWindow* gl_window_ = nullptr;
     const std::string SELECTION_WINDOW_NAME = "Select Object to Track";
+
+    cv::Mat latest_frame_;
+    std::mutex frame_mutex_;
+    bool new_frame_available_ = false;
 };
 
 TrackerNode::TrackerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
@@ -281,39 +287,46 @@ void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, co
         return;
     }
 
-    // --- Publish Experiment Control Message ---
-    rectrial::pub_data experiment_msg;
-    experiment_msg.video_name_p = experiment_id_;
-    experiment_msg.data_e = csv_lines_[csv_index_];
-    experiment_msg.image_p = *original_msg; // Pass original image
-    
-    if (csv_index_ == 0) {
-        experiment_msg.finish_c = "start";
-    } else if (csv_index_ >= csv_lines_.size() - 1) {
-        experiment_msg.finish_c = "end";
-    } else {
-        experiment_msg.finish_c = "null";
-    }
-    experiment_pub_.publish(experiment_msg);
-
-    // --- Publish Processed Data Message ---
-    rectrial::pub_data processed_msg;
-    processed_msg.video_name_p = experiment_id_ + "_processed";
-    processed_msg.data_e = std::to_string(current_offset_.x) + "," + std::to_string(current_offset_.y);
-    
-    // Also populate the specific fields if they are used by other nodes
-    processed_msg.target_pos_x = current_offset_.x;
-    // processed_msg.target_pos_y = std::to_string(current_offset_.y); // Assuming this field exists
-
-    processed_msg.finish_c = experiment_msg.finish_c;
-    
-    // Convert processed frame and publish
-    std_msgs::Header header;
-    header.stamp = ros::Time::now();
-    sensor_msgs::ImagePtr image_msg = cv_bridge::CvImage(header, "mono8", processed_frame).toImageMsg();
-    processed_msg.image_e = *image_msg;
-
-    processed_pub_.publish(processed_msg);
+     // --- Publish Experiment Control Message (to the Motor Node) ---
+     rectrial::pub_data experiment_msg;
+     experiment_msg.video_name_p = experiment_id_;
+     experiment_msg.data_e = csv_lines_[csv_index_];
+     experiment_msg.image_p = *original_msg;
+ 
+     // ===================================================================
+     // V V V V V V V V V  THE CRITICAL CHANGE IS HERE  V V V V V V V V V V V
+     //
+     // Populate the target_pos_x field with the live tracking data.
+     // This sends the fish's position to the motor node for closed-loop control.
+     experiment_msg.target_pos_x = current_offset_.x;
+     //
+     // ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^
+     // ===================================================================
+     
+     if (csv_index_ == 0) {
+         experiment_msg.finish_c = "start";
+     } else if (csv_index_ >= csv_lines_.size() - 1) {
+         experiment_msg.finish_c = "end";
+     } else {
+         experiment_msg.finish_c = "null";
+     }
+     // This is the publisher the motor node listens to.
+     experiment_pub_.publish(experiment_msg);
+ 
+     // --- Publish Processed Data Message (for visualization/debugging) ---
+     // This part remains the same.
+     rectrial::pub_data processed_msg;
+     processed_msg.video_name_p = experiment_id_ + "_processed";
+     processed_msg.data_e = std::to_string(current_offset_.x) + "," + std::to_string(current_offset_.y);
+     processed_msg.target_pos_x = current_offset_.x;
+     processed_msg.finish_c = experiment_msg.finish_c;
+     
+     std_msgs::Header header;
+     header.stamp = ros::Time::now();
+     sensor_msgs::ImagePtr image_msg = cv_bridge::CvImage(header, "mono8", processed_frame).toImageMsg();
+     processed_msg.image_e = *image_msg;
+ 
+     processed_pub_.publish(processed_msg);
 
     // --- Update state for next iteration ---
     csv_index_++;
@@ -344,13 +357,24 @@ std::string TrackerNode::getCurrentTimestamp()
 
 void TrackerNode::spin()
 {
-    ros::Rate rate(30); // Control the loop rate to 30 Hz
+    ros::Rate rate(25); // Control the loop rate to 25 Hz
     rectrial::pub_data::ConstPtr last_custom_msg;
 
     while (ros::ok())
     {
+
+        // =========================================================
+        // 1. Record the start time at the beginning of the loop
+        auto start_time = std::chrono::steady_clock::now();
+        // =========================================================
+
         // Get the latest image message that the callback has received
-        last_custom_msg = ros::topic::waitForMessage<rectrial::pub_data>("/imager_c", nh_, ros::Duration(1.0));
+        //last_custom_msg = ros::topic::waitForMessage<rectrial::pub_data>("/imager_c", nh_, ros::Duration(1.0));
+        {
+            std::lock_guard<std::mutex> lock(frame_mutex_);
+            latest_frame_ = frame.clone(); // Already done
+            new_frame_available_ = true;
+        }
 
         if (last_custom_msg) {
             // Create a shared_ptr to the image part of the message to pass to other functions
@@ -399,6 +423,16 @@ void TrackerNode::spin()
         }
         
         ros::spinOnce();
+
+        // =========================================================
+        // 2. Record the end time and calculate the duration
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+
+        // 3. Print the processing time to the console
+        ROS_INFO("Frame processed in: %ld ms", duration_ms);
+        // =========================================================
+
         rate.sleep();
     }
 }
