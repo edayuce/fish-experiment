@@ -405,7 +405,8 @@ void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, co
     processed_msg.finish_c = experiment_msg.finish_c;
 
     std_msgs::Header header;
-    header.stamp = ros::Time::now();
+    header.stamp = original_msg->header.stamp; // Use the original image timestamp
+    header.frame_id = original_msg->header.frame_id; // Use the original frame_id
     sensor_msgs::ImagePtr image_msg = cv_bridge::CvImage(header, "mono8", processed_frame).toImageMsg();
     processed_msg.image_e = *image_msg;
 

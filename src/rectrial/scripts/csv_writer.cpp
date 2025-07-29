@@ -41,7 +41,8 @@ public:
         refuge_sub_.subscribe(nh_, "/refuge_state", 1);
 
         // Use an ApproximateTime synchronizer to get paired messages from the two topics
-        sync_.reset(new Sync(MySyncPolicy(10), fish_sub_, refuge_sub_));
+        sync_.reset(new Sync(MySyncPolicy(100), fish_sub_, refuge_sub_));
+        sync_->setMaxIntervalDuration(ros::Duration(0.04));
         sync_->registerCallback(boost::bind(&CSVWriterNode::dataCallback, this, _1, _2));
         
         // Initialize the timer
@@ -61,6 +62,8 @@ private:
     // This callback is triggered when a synchronized pair of messages arrives
     void dataCallback(const rectrial::pub_data::ConstPtr& fish_msg, const geometry_msgs::PointStamped::ConstPtr& refuge_msg)
     {
+        ROS_INFO("Datacallback triggired");
+
         auto now = std::chrono::steady_clock::now();
         long long iteration_time_ms = 0;
 

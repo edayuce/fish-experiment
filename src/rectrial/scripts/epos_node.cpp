@@ -394,8 +394,8 @@ private:
         //refuge_state_pub_.publish(refuge_msg);
 
         geometry_msgs::PointStamped refuge_msg;
-        refuge_msg.header.stamp = ros::Time::now();
-        refuge_msg.header.frame_id = "world"; // Use a consistent frame_id
+        refuge_msg.header.stamp = msg->image_p.header.stamp; // Use the original image timestamp
+        refuge_msg.header.frame_id = msg->image_p.header.frame_id; // Use the original frame_id
         refuge_msg.point.x = target_position_float;
         refuge_msg.point.y = 0;
         refuge_msg.point.z = 0;
