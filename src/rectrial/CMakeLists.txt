@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   roslint
   message_generation
+  geometry_msgs
 )
 
 # Find OpenCV
@@ -103,18 +104,8 @@ add_executable(experiment_controller    scripts/experiment_controller.cpp)
 add_executable(rec_node                 scripts/rec_node.cpp)
 add_executable(epos_node                scripts/epos_node.cpp)
 add_executable(real_time_tracker        scripts/real_time_tracker.cpp)
-target_link_libraries(real_time_tracker
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBRARIES}
-)
-add_executable(main_node             scripts/main_node.cpp)
-target_link_libraries(main_node
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBRARIES}
-  GlWindow
-  SDL2
-  dl
-)
+add_executable(main_node                scripts/main_node.cpp)
+add_executable(csv_writer_node          scripts/csv_writer.cpp)
 
 
 
@@ -158,7 +149,23 @@ target_link_libraries(epos_node
   rt
 )
 
+target_link_libraries(real_time_tracker
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
 
+target_link_libraries(main_node
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  GlWindow
+  SDL2
+  dl
+)
+
+target_link_libraries(csv_writer_node 
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
 
 # ===================================================================
 # Dependencies
@@ -170,3 +177,5 @@ add_dependencies(rec_node              ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(epos_node             ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(main_node             ${PROJECT_NAME}_generate_messages_cpp)
 add_dependencies(real_time_tracker     ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(csv_writer_node       ${PROJECT_NAME}_generate_messages_cpp)
+

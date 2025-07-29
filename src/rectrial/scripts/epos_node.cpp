@@ -1,6 +1,8 @@
 #include <ros/ros.h>
 #include <rectrial/pub_data.h>
 #include "std_msgs/String.h"
+#include "std_msgs/Float64.h"
+#include <geometry_msgs/PointStamped.h> 
 #include "Definitions.h" // Your Maxon motor library header
 
 #include <string>
@@ -34,6 +36,7 @@ public:
         sub_motor_freq_ = root_nh_.subscribe("/set_motor_freq", 10, &MaxonMotorController::motorSetFreqCallback, this);
         sub_state_ = root_nh_.subscribe("/set_state", 10, &MaxonMotorController::stateCallback, this);
         sub_experiment_trigger_ = root_nh_.subscribe("/start_experiment", 100, &MaxonMotorController::imageCallback, this);
+        refuge_state_pub_ = root_nh_.advertise<geometry_msgs::PointStamped>("/refuge_state", 10);
 
 
         // --- Hardware Initialization ---
@@ -69,6 +72,7 @@ private:
     // ROS Members
     // =========================================================================
     ros::NodeHandle root_nh_;
+    ros::Publisher refuge_state_pub_;
     ros::NodeHandle nh_; // Private NodeHandle for parameters
     ros::Subscriber sub_motor_freq_;
     // FIX 2: Declare the subscriber variable that was missing.
@@ -105,6 +109,9 @@ private:
     std::string port_name_;
     int baudrate_ = 0;
     double a_pos_ = 0.0; // Calculated amplitude in motor counts
+
+    std_msgs::Float64 refuge_msg;
+    double last_refuge_position_ = 0.0;
 
     // =========================================================================
     // Parameter Loading Function
@@ -276,7 +283,7 @@ private:
         }
     }
 
-    void imageCallback(const rectrial::pub_data::ConstPtr& msg) {
+/*     void imageCallback(const rectrial::pub_data::ConstPtr& msg) {
         // --- Timing and Initialization on "start" command ---
         if (msg->finish_c == "start") {
             loop_start_time_ = std::chrono::steady_clock::now();
@@ -327,7 +334,75 @@ private:
         if (!VCS_MoveToPosition(key_handle_, node_id_, target_position, 1, 1, &error_code)) {
             ROS_ERROR("VCS_MoveToPosition failed. Error: 0x%X", error_code);
         }
+    } */
+
+
+    void imageCallback(const rectrial::pub_data::ConstPtr& msg)
+    {
+        if (msg->finish_c == "start") {
+            loop_start_time_ = std::chrono::steady_clock::now();
+            // Reset the refuge position at the start of each trial
+            last_refuge_position_ = 0.0;
+            frame_counter_ = 0;
+            ROS_INFO("START command received. Resetting position and timers.");
+        }
+            // --- Homing and Teardown on "end" command ---
+        if (msg->finish_c == "end") {
+            ROS_INFO("END command received. Homing motor.");
+            ROS_INFO("Overshoot Count: %d / %d frames.", overshoot_counter_, frame_counter_);
+            unsigned int error_code = 0;
+            // FIX 4: Corrected the function name from VCS_HaltMovement
+            VCS_HaltVelocityMovement(key_handle_, node_id_, &error_code);
+            initializeMotor(); // Re-home the motor
+            return;
+        }
+
+        frame_counter_++;
+        double target_position_float = 0.0;
+
+        // This is the main logic switch
+        if (is_gain_mode_ || is_closed_loop_) 
+        {
+            // --- This is the new dynamic logic ---
+            double fish_position = msg->target_pos_x;
+
+            // 1. Calculate the new target position using your formula
+            target_position_float = (fish_position * reafferent_gain_) + last_refuge_position_;
+
+            // 2. Update the state for the next iteration
+            last_refuge_position_ = target_position_float;
+        }
+        else if (is_sum_of_sines_)
+        {
+            double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - loop_start_time_).count();
+            target_position_float = calculateSumOfSines(time_ms);
+        }
+        else // Default to single sine
+        {
+            double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - loop_start_time_).count();
+            target_position_float = (a_pos_ / (2.0 * M_PI * frequency_)) * sin(2.0 * M_PI * frequency_ * time_ms / 1000.0);
+        }
+
+        // --- Send command to motor ---
+        unsigned int error_code = 0;
+        long target_position = static_cast<long>(target_position_float);
+        if (!VCS_MoveToPosition(key_handle_, node_id_, target_position, 1, 1, &error_code)) {
+            ROS_ERROR("VCS_MoveToPosition failed. Error: 0x%X", error_code);
+        }
+
+        //refuge_msg.data = target_position_float;
+        //refuge_state_pub_.publish(refuge_msg);
+
+        geometry_msgs::PointStamped refuge_msg;
+        refuge_msg.header.stamp = ros::Time::now();
+        refuge_msg.header.frame_id = "world"; // Use a consistent frame_id
+        refuge_msg.point.x = target_position_float;
+        refuge_msg.point.y = 0;
+        refuge_msg.point.z = 0;
+        refuge_state_pub_.publish(refuge_msg);
+
     }
+
 
     // =========================================================================
     // Calculation Helpers

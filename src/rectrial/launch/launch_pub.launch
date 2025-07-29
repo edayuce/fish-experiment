@@ -3,15 +3,19 @@
 <env name="OPENCV_GUI_BACKEND" value="QT" />
 
 <node pkg="rectrial" type="main_node" name="main_node" output="screen">
-<param name="csv_file_path" value="$(find rectrial)/data/positions.csv" />
-
+	<param name="csv_file_path" value="$(find rectrial)/data/positions.csv" />
 </node>
 <node pkg="rectrial" type= "basler_camera_node" name="basler_camera_node" output="screen" launch-prefix="taskset -c 5"/>
 <node pkg="rectrial" type="experiment_controller" name="experiment_controller_node" output="screen" />
 <node pkg="rectrial" type="real_time_tracker" name="tracker" output="screen">
 </node>
+
 <node pkg = "rectrial" name ="rec_node"    	type= "rec_node"/>
+
 <node pkg = "rectrial" name ="epos_node"    	type= "epos_node" output="screen" launch-prefix="taskset -c 4"/>
 
+<node pkg="rectrial" type="csv_writer_node" name="csv_writer_node" output="screen">
+	<param name="output_file_path" value="$(find rectrial)/data/experiment_log.csv" />
+</node>
 
 </launch>

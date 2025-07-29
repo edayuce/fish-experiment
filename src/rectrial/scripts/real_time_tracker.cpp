@@ -72,7 +72,7 @@ private:
     // Configuration
     int BBOX_WIDTH_ = 50;
     int BBOX_HEIGHT_ = 50;
-    const std::string SELECTION_WINDOW_NAME_ = "Select Object to Track";
+    const std::string SELECTION_WINDOW_NAME_ = "Select Fish";
     const std::string TRACKING_WINDOW_NAME_ = "Tracking";
 };
 
@@ -228,7 +228,6 @@ void OnlineTrackerNode::stateCallback(const std_msgs::String::ConstPtr& msg)
 
 int main(int argc, char** argv)
 {
-    std::cout << cv::getBuildInformation() << std::endl;
 
     ros::init(argc, argv, "real_time_tracker_node");
     ros::NodeHandle nh("~"); // Use private node handle for parameters

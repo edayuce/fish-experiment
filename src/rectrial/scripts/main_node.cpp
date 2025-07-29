@@ -85,7 +85,7 @@ private:
     NodeState state_;
     std::string experiment_id_;
     int csv_index_;
-    std::vector<std::string> csv_lines_;
+    //std::vector<std::string> csv_lines_;
 
     // Tracking
     cv::Ptr<cv::Tracker> tracker_;
@@ -94,13 +94,13 @@ private:
     cv::Point2f current_offset_;
 
     // Configuration
-    std::string csv_file_path_;
+    //std::string csv_file_path_;
     int BBOX_WIDTH_ = 50;
     int BBOX_HEIGHT_ = 50;
     
     // Display
     GLWindow* gl_window_ = nullptr;
-    const std::string SELECTION_WINDOW_NAME = "Select Object to Track";
+    const std::string SELECTION_WINDOW_NAME = "Select Refuge";
 
     std::mutex frame_mutex_;
     rectrial::pub_data::ConstPtr latest_msg_;
@@ -112,7 +112,7 @@ TrackerNode::TrackerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     : nh_(nh), pnh_(pnh), state_(NodeState::WAITING_FOR_SELECTION), csv_index_(0)
 {
     // --- 1. Load parameters using the private node handle ---
-    pnh_.param<std::string>("csv_file_path", csv_file_path_, "positions.csv");
+    //pnh_.param<std::string>("csv_file_path", csv_file_path_, "positions.csv");
     pnh_.param<int>("bbox_width", BBOX_WIDTH_, 50);
     pnh_.param<int>("bbox_height", BBOX_HEIGHT_, 50);
 
@@ -123,7 +123,7 @@ TrackerNode::TrackerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     image_sub_ = nh_.subscribe("/imager_c", 1, &TrackerNode::imageCallback, this);
     state_sub_ = nh_.subscribe("set_state", 10, &TrackerNode::stateCallback, this);
 
-    // --- 3. Load CSV data ---
+/*     // --- 3. Load CSV data ---
     std::ifstream fin(csv_file_path_);
     if (!fin.is_open())
     {
@@ -143,7 +143,7 @@ TrackerNode::TrackerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
 
     if (csv_lines_.empty()) {
         ROS_WARN("CSV file is empty. Experiment may not run correctly.");
-    }
+    } */
 
     ROS_INFO("TrackerNode initialized. Waiting for image and object selection...");
     
@@ -306,7 +306,7 @@ void TrackerNode::updateTracking(const cv::Mat& frame)
     cv::putText(frame, "Frame: " + std::to_string(csv_index_), cv::Point(25, 25), cv::FONT_HERSHEY_SIMPLEX, 0.8, CV_RGB(200, 200, 200), 2);
 }
 
-void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, const cv::Mat& processed_frame)
+/* void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, const cv::Mat& processed_frame)
 {
     if (csv_lines_.empty() || csv_index_ >= csv_lines_.size()) {
         ROS_WARN("Attempted to publish data but CSV data is exhausted.");
@@ -361,7 +361,7 @@ void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, co
         ROS_INFO("Experiment finished.");
         state_ = NodeState::EXPERIMENT_DONE;
     }
-}
+}*/
 
 
 void TrackerNode::stateCallback(const std_msgs::String::ConstPtr& msg)
@@ -372,6 +372,48 @@ void TrackerNode::stateCallback(const std_msgs::String::ConstPtr& msg)
         ros::shutdown();
     }
 }
+
+// In main_node.cpp
+void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, const cv::Mat& processed_frame)
+{
+    // --- Publish Experiment Control Message (to the Motor Node) ---
+    rectrial::pub_data experiment_msg;
+    experiment_msg.video_name_p = experiment_id_;
+    experiment_msg.image_p = *original_msg;
+
+    // The tracker's only job is to report the measured fish position.
+    experiment_msg.target_pos_x = current_offset_.x;
+
+    // The data_e field is not used for motor control in this mode.
+    experiment_msg.data_e = "tracking";
+
+    // Use a simple counter to signal start/end
+    if (csv_index_ == 0) {
+        experiment_msg.finish_c = "start";
+    } else {
+        // In this dynamic mode, the experiment doesn't have a natural end from a CSV.
+        // It will run until you stop it.
+        experiment_msg.finish_c = "null";
+    }
+    experiment_pub_.publish(experiment_msg);
+
+    // --- Publish Processed Data Message (for visualization) ---
+    rectrial::pub_data processed_msg;
+    processed_msg.video_name_p = experiment_id_ + "_processed";
+    processed_msg.data_e = std::to_string(current_offset_.x) + "," + std::to_string(current_offset_.y);
+    processed_msg.target_pos_x = current_offset_.x;
+    processed_msg.finish_c = experiment_msg.finish_c;
+
+    std_msgs::Header header;
+    header.stamp = ros::Time::now();
+    sensor_msgs::ImagePtr image_msg = cv_bridge::CvImage(header, "mono8", processed_frame).toImageMsg();
+    processed_msg.image_e = *image_msg;
+
+    processed_pub_.publish(processed_msg);
+
+    csv_index_++;
+}
+
 
 std::string TrackerNode::getCurrentTimestamp()
 {
@@ -466,7 +508,7 @@ void TrackerNode::spin()
 
     while (ros::ok())
     {
-        auto start_time = std::chrono::steady_clock::now();
+        //auto start_time = std::chrono::steady_clock::now();
 
         rectrial::pub_data::ConstPtr msg_to_process;
         bool frame_to_process = false;
@@ -536,9 +578,9 @@ void TrackerNode::spin()
 
         ros::spinOnce(); // Process callbacks to receive new images
 
-        auto end_time = std::chrono::steady_clock::now();
-        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        ROS_INFO("Loop iteration time: %ld ms", duration_ms);
+        //auto end_time = std::chrono::steady_clock::now();
+        //auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        //ROS_INFO("Loop iteration time: %ld ms", duration_ms);
 
         rate.sleep();
     }
