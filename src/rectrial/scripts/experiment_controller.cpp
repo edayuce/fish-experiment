@@ -1,7 +1,6 @@
-//old my_subscriber.cpp
+// old my_subscriber.cpp
 
 #include <ros/ros.h>
-#include <ros/package.h>
 #include <std_msgs/String.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
@@ -9,29 +8,41 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
-// Custom message - ensure this path is correct
+// Custom message
 #include <rectrial/pub_data.h>
 
 #include "GLWindow.h" // Assuming GLWindow.h is in the include path
 
 #include <string>
-#include <fstream>
 #include <vector>
 #include <iostream>
 #include <chrono>
-#include <iomanip> // For formatting time
+#include <iomanip> // For formatting time and float values
+#include <sstream> // Required for parsing strings
+#include <cmath>   // For std::sqrt
 
-// Use a namespace to keep the code organized
 namespace ExperimentController
 {
 
-// An enum provides a much clearer way to manage the node's state
+// Defines the overall state of the node (controlled by spacebar)
 enum class NodeState
 {
+    WAITING_FOR_DATA, // New initial state
     WAITING_FOR_START,
-    PUBLISHING_DATA,
+    EXPERIMENT_RUNNING,
     EXPERIMENT_DONE
 };
+
+// Defines the behavior during the experiment (controlled by the GUI)
+enum class ControlMode
+{
+    INACTIVE,
+    CLOSED_LOOP_GAIN, // The mode that uses: new_pos = (fish_pos * gain) + prev_pos
+    OPEN_LOOP_GAIN,
+    FIXED_FREQ,
+    SUM_OF_SINES
+};
+
 
 class ControllerNode
 {
@@ -39,89 +50,86 @@ public:
     ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh);
     ~ControllerNode();
 
-    void spin(); // Main loop for handling events and state
+    void spin(); // Main loop
 
 private:
     // Callbacks
-    void imageCallback(const sensor_msgs::ImageConstPtr& msg);
+    void fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
+    void refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
+    void motorCommandCallback(const std_msgs::String::ConstPtr& msg);
 
     // Core Logic
-    void processImage(const cv::Mat& frame);
-    void publishData(const sensor_msgs::ImageConstPtr& original_msg);
+    void publishCalculatedData(bool is_stopping);
+    void processAndDraw(cv::Mat& frame);
     std::string getCurrentTimestamp();
+    std::string controlModeToString();
+    cv::Point2f parsePosition(const std::string& data);
 
     // Member Variables
     ros::NodeHandle nh_;
-    ros::NodeHandle pnh_; // Private node handle for parameters
+    ros::NodeHandle pnh_;
 
     // ROS Communication
     ros::Publisher experiment_data_pub_;
-    image_transport::Subscriber image_sub_;
+    ros::Subscriber fish_tracker_sub_;
+    ros::Subscriber refuge_tracker_sub_; // New subscriber for the refuge
     ros::Subscriber state_sub_;
+    ros::Subscriber motor_command_sub_;
 
     // State Management
-    NodeState state_;
+    NodeState node_state_;
+    ControlMode control_mode_;
     std::string experiment_id_;
-    int csv_index_;
-    std::vector<std::string> csv_lines_;
-    sensor_msgs::ImageConstPtr last_image_msg_; // Store the latest image
+    long frame_counter_;
+    rectrial::pub_data::ConstPtr last_fish_tracker_msg_; // Latest message from the fish tracker
+    bool has_fish_data_ = false;
+    bool has_refuge_data_ = false;
 
-    // Configuration
-    std::string csv_file_path_;
-    
+    // Calculation Parameters
+    double gain_;
+    double fixed_frequency_;
+    cv::Point2f fish_pos_;      // Position received from the fish tracker
+    cv::Point2f refuge_pos_;    // Position received from the refuge tracker
+    cv::Point2f prev_pos_;      // The result from the previous step
+    cv::Point2f new_pos_;       // The newly calculated position to be published
+
     // Display
     GLWindow* gl_window_ = nullptr;
 };
 
 ControllerNode::ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
-    : nh_(nh), pnh_(pnh), state_(NodeState::WAITING_FOR_START), csv_index_(0)
+    : nh_(nh), 
+      pnh_(pnh), 
+      node_state_(NodeState::WAITING_FOR_DATA), // Start in a state waiting for initial data
+      control_mode_(ControlMode::FIXED_FREQ),
+      frame_counter_(0), 
+      gain_(0.5),
+      fixed_frequency_(0.2)
 {
-    // --- 1. Load parameters from the ROS parameter server ---
-    // This makes the node reusable without changing the code.
-    pnh_.param<std::string>("csv_file_path", csv_file_path_, "positions.csv");
-    ROS_INFO_STREAM("Loading positions from: " << csv_file_path_);
-
-    // --- 2. Setup Publishers and Subscribers ---
+    // --- 1. Setup Publishers and Subscribers ---
     experiment_data_pub_ = nh_.advertise<rectrial::pub_data>("imager", 10);
     
-    image_transport::ImageTransport it(nh_);
-    // The image callback just stores the latest message. The main loop processes it.
-    image_sub_ = it.subscribe("/imager_c", 1, &ControllerNode::imageCallback, this);
-    state_sub_ = nh_.subscribe("set_state", 10, &ControllerNode::stateCallback, this);
-
-    // --- 3. Load CSV data ---
-    std::ifstream fin(csv_file_path_);
-    if (!fin.is_open())
-    {
-        ROS_FATAL_STREAM("Could not open positions CSV file: " << csv_file_path_);
-        ros::shutdown();
-        return;
-    }
-
-    std::string line;
-    while (std::getline(fin, line))
-    {
-        if (!line.empty()) {
-            csv_lines_.push_back(line);
-        }
-    }
-    fin.close();
-
-    if (csv_lines_.empty()) {
-        ROS_WARN("CSV file is empty. The node will run but not publish any data.");
-    }
-
-    ROS_INFO("ControllerNode initialized. Waiting for images and user input...");
+    // Subscribe to the fish tracker
+    fish_tracker_sub_ = nh_.subscribe("/imager_processed", 5, &ControllerNode::fishTrackerCallback, this);
+    // Subscribe to the NEW refuge tracker
+    refuge_tracker_sub_ = nh_.subscribe("/refuge_data", 5, &ControllerNode::refugeTrackerCallback, this);
     
-    // --- 4. Initialize Display ---
+    state_sub_ = nh_.subscribe("set_state", 10, &ControllerNode::stateCallback, this);
+    motor_command_sub_ = nh_.subscribe("set_motor_freq", 10, &ControllerNode::motorCommandCallback, this);
+
+    // --- 2. Initialize Calculation Variables ---
+    prev_pos_ = cv::Point2f(0.0f, 0.0f);
+
+    ROS_INFO("ControllerNode initialized. Waiting for data from fish and refuge trackers...");
+    
+    // --- 3. Initialize Display ---
     gl_window_ = new GLWindow(0, 0);
     gl_window_->setTitle("Experiment Control Screen");
 }
 
 ControllerNode::~ControllerNode()
 {
-    // Properly clean up dynamically allocated memory
     if (gl_window_)
     {
         delete gl_window_;
@@ -129,67 +137,151 @@ ControllerNode::~ControllerNode()
     }
 }
 
-// This callback is now very simple: it just saves the latest message pointer.
-void ControllerNode::imageCallback(const sensor_msgs::ImageConstPtr& msg)
-{
-    last_image_msg_ = msg;
+// Helper function to parse "x,y" string into a Point2f
+cv::Point2f ControllerNode::parsePosition(const std::string& data) {
+    cv::Point2f pos(0,0);
+    std::stringstream ss(data);
+    std::string x_str, y_str;
+    
+    if (std::getline(ss, x_str, ',') && std::getline(ss, y_str)) {
+        try {
+            pos.x = std::stof(x_str);
+            pos.y = std::stof(y_str);
+        } catch(const std::exception& e) {
+            ROS_ERROR("Failed to parse position from data string: '%s'", data.c_str());
+        }
+    } else {
+        ROS_WARN("Received malformed position data: '%s'", data.c_str());
+    }
+    return pos;
 }
 
-void ControllerNode::processImage(const cv::Mat& frame)
+// Callback for data from the OnlineTrackerNode (fish)
+void ControllerNode::fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg)
 {
-    // This function is now only responsible for drawing the correct overlay.
-    switch (state_)
+    last_fish_tracker_msg_ = msg;
+    fish_pos_ = parsePosition(msg->data_e);
+    if (!has_fish_data_) {
+        has_fish_data_ = true;
+        ROS_INFO("Received first data packet from fish tracker.");
+    }
+}
+
+// NEW Callback for data from the RefugeTrackerNode
+void ControllerNode::refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg)
+{
+    refuge_pos_ = parsePosition(msg->data_e);
+    if (!has_refuge_data_) {
+        has_refuge_data_ = true;
+        ROS_INFO("Received first data packet from refuge tracker.");
+    }
+}
+
+void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg)
+{
+    const std::string& cmd = msg->data;
+    ROS_INFO_STREAM("Received command from GUI: " << cmd);
+
+    if (cmd.rfind("gain:", 0) == 0) {
+        try {
+            std::string val_str = cmd.substr(5);
+            gain_ = std::stod(val_str);
+            control_mode_ = ControlMode::CLOSED_LOOP_GAIN;
+            ROS_INFO("Set mode to CLOSED_LOOP_GAIN with gain = %f", gain_);
+        } catch (const std::exception& e) { ROS_ERROR("Failed to parse gain: %s", cmd.c_str()); }
+    } 
+    else if (cmd.rfind("ol_gain:", 0) == 0) {
+        try {
+            std::string val_str = cmd.substr(8);
+            gain_ = std::stod(val_str);
+            control_mode_ = ControlMode::OPEN_LOOP_GAIN;
+            ROS_INFO("Set mode to OPEN_LOOP_GAIN with gain = %f", gain_);
+        } catch (const std::exception& e) { ROS_ERROR("Failed to parse gain: %s", cmd.c_str()); }
+    }
+    else if (cmd == "closedloop") {
+        control_mode_ = ControlMode::CLOSED_LOOP_GAIN;
+        ROS_INFO("Set mode to CLOSED_LOOP_GAIN (gain: %f)", gain_);
+    }
+    else if (cmd == "openloop") {
+        control_mode_ = ControlMode::OPEN_LOOP_GAIN;
+        ROS_INFO("Set mode to OPEN_LOOP_GAIN (gain: %f)", gain_);
+    }
+    else if (cmd == "sum") {
+        control_mode_ = ControlMode::SUM_OF_SINES;
+        ROS_INFO("Set mode to SUM_OF_SINES");
+    }
+    else { 
+        try {
+            fixed_frequency_ = std::stod(cmd);
+            control_mode_ = ControlMode::FIXED_FREQ;
+            ROS_INFO("Set mode to FIXED_FREQ with freq = %f", fixed_frequency_);
+        } catch (const std::exception& e) { ROS_WARN("Unknown command/frequency: %s", cmd.c_str()); }
+    }
+}
+
+// Draws the current state and data onto the image for display.
+void ControllerNode::processAndDraw(cv::Mat& frame)
+{
+    std::stringstream ss;
+    cv::Scalar text_color = CV_RGB(200, 200, 200);
+    
+    // Draw refuge position if available
+    if(has_refuge_data_) {
+        cv::putText(frame, "Refuge: (" + std::to_string((int)refuge_pos_.x) + "," + std::to_string((int)refuge_pos_.y) + ")", 
+                    cv::Point(frame.cols - 250, 30), cv::FONT_HERSHEY_SIMPLEX, 0.6, CV_RGB(0, 255, 0), 2);
+    }
+
+    switch (node_state_)
     {
+        case NodeState::WAITING_FOR_DATA:
+            cv::putText(frame, "Waiting for tracker data...", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+            break;
         case NodeState::WAITING_FOR_START:
-            cv::putText(frame, "Press Space to Start Experiment", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 1.0, CV_RGB(200, 200, 200), 2);
+            cv::putText(frame, "Press Space to Start Experiment", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
             break;
-
-        case NodeState::PUBLISHING_DATA:
-            cv::putText(frame, "Frame: " + std::to_string(csv_index_), cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 1.0, CV_RGB(200, 200, 200), 2);
+        case NodeState::EXPERIMENT_RUNNING:
+            ss << std::fixed << std::setprecision(2)
+               << "Mode: " << controlModeToString() << " | Gain: " << gain_ 
+               << " | Fish: (" << (int)fish_pos_.x << ", " << (int)fish_pos_.y << ")"
+               << " | New Pos: (" << (int)new_pos_.x << ", " << (int)new_pos_.y << ")";
+            cv::putText(frame, ss.str(), cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.6, CV_RGB(50, 255, 50), 2);
+            cv::putText(frame, "Frame: " + std::to_string(frame_counter_), cv::Point(25, 90), cv::FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2);
+            cv::putText(frame, "Press Space to STOP", cv::Point(25, 130), cv::FONT_HERSHEY_SIMPLEX, 0.7, CV_RGB(255, 100, 100), 2);
             break;
-
         case NodeState::EXPERIMENT_DONE:
-            cv::putText(frame, "Experiment Done. Press Space to Restart.", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.8, CV_RGB(200, 200, 200), 2);
+            cv::putText(frame, "Experiment Done. Press Space to Restart.", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.8, text_color, 2);
             break;
     }
 
-    // Update the GL window with the annotated frame
     if (gl_window_)
     {
-        // Assuming GL_RED is for single-channel mono8 images
         gl_window_->updateImage(frame.ptr(0), frame.cols, frame.rows, GL_RED);
     }
 }
 
-void ControllerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg)
+// Performs the calculation and publishes the custom message.
+void ControllerNode::publishCalculatedData(bool is_stopping = false)
 {
-    if (csv_lines_.empty() || csv_index_ >= csv_lines_.size()) {
-        ROS_WARN("Attempted to publish data but CSV data is exhausted.");
-        state_ = NodeState::EXPERIMENT_DONE;
-        return;
-    }
+    if (!last_fish_tracker_msg_) return;
 
     rectrial::pub_data experiment_msg;
     experiment_msg.video_name_p = experiment_id_;
-    experiment_msg.data_e = csv_lines_[csv_index_];
-    experiment_msg.image_e = *original_msg; // Pass original image
     
-    if (csv_index_ == 0) {
+    std::stringstream ss;
+    ss << new_pos_.x << "," << new_pos_.y;
+    experiment_msg.data_e = ss.str();
+
+    experiment_msg.image_e = last_fish_tracker_msg_->image_e;
+    
+    if (frame_counter_ == 0 && !is_stopping) {
         experiment_msg.finish_c = "start";
-    } else if (csv_index_ >= csv_lines_.size() - 1) {
+    } else if (is_stopping) {
         experiment_msg.finish_c = "end";
     } else {
         experiment_msg.finish_c = "null";
     }
     
     experiment_data_pub_.publish(experiment_msg);
-
-    // Update state for the next iteration
-    csv_index_++;
-    if (csv_index_ >= csv_lines_.size()) {
-        ROS_INFO("Finished publishing all data for this run.");
-        state_ = NodeState::EXPERIMENT_DONE;
-    }
 }
 
 void ControllerNode::stateCallback(const std_msgs::String::ConstPtr& msg)
@@ -210,49 +302,83 @@ std::string ControllerNode::getCurrentTimestamp()
     return ss.str();
 }
 
+std::string ControllerNode::controlModeToString()
+{
+    switch(control_mode_) {
+        case ControlMode::INACTIVE:         return "Inactive";
+        case ControlMode::CLOSED_LOOP_GAIN: return "ClosedLoop";
+        case ControlMode::OPEN_LOOP_GAIN:   return "OpenLoop";
+        case Control_mode::FIXED_FREQ:       return "FixedFreq";
+        case ControlMode::SUM_OF_SINES:     return "SumOfSines";
+        default:                            return "Unknown";
+    }
+}
+
 void ControllerNode::spin()
 {
-    ros::Rate rate(60); // Control the main loop rate
+    ros::Rate rate(60);
 
     while (ros::ok())
     {
-        // Process any incoming ROS messages (e.g., image callback)
         ros::spinOnce();
 
-        // Only process and publish if we have received an image
-        if (last_image_msg_) {
-            // If we are in the publishing state, publish the data
-            if (state_ == NodeState::PUBLISHING_DATA) {
-                 publishData(last_image_msg_);
-            }
-
-            // Always draw the latest visuals, regardless of state
-            try {
-                cv::Mat frame = cv_bridge::toCvShare(last_image_msg_, "mono8")->image.clone();
-                if (!frame.empty()) {
-                    processImage(frame);
-                }
-            } catch (const cv_bridge::Exception& e) {
-                ROS_ERROR("cv_bridge exception in main loop: %s", e.what());
-            }
-        } else {
-            ROS_WARN_THROTTLE(5.0, "No image received on /imager_c yet...");
+        // Check if we can transition from waiting for data to ready
+        if (node_state_ == NodeState::WAITING_FOR_DATA && has_fish_data_ && has_refuge_data_) {
+            node_state_ = NodeState::WAITING_FOR_START;
+            ROS_INFO("All tracker data received. Ready to start experiment.");
         }
 
-        // Handle keyboard input from SDL in the main loop
+        if (last_fish_tracker_msg_) {
+            try {
+                cv::Mat frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "mono8")->image.clone();
+                if (!frame.empty()) {
+                    
+                    if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
+                        
+                        // Example of using both data points: calculate distance
+                        double distance = cv::norm(fish_pos_ - refuge_pos_);
+                        // ROS_INFO_THROTTLE(1.0, "Distance to refuge: %f", distance);
+
+                        if (control_mode_ == ControlMode::CLOSED_LOOP_GAIN) {
+                            new_pos_ = (fish_pos_ * gain_) + prev_pos_;
+                        } else {
+                            new_pos_ = prev_pos_; 
+                        }
+                        
+                        publishCalculatedData(false);
+                        
+                        prev_pos_ = new_pos_;
+                        frame_counter_++;
+                    }
+                    
+                    processAndDraw(frame);
+                }
+            } catch (const cv_bridge::Exception& e) {
+                ROS_ERROR("cv_bridge exception: %s", e.what());
+            }
+        } else if (node_state_ == NodeState::WAITING_FOR_DATA) {
+             ROS_WARN_THROTTLE(5.0, "Waiting for data from fish tracker on /imager_processed...");
+        }
+
         SDL_Event sdl_event;
         while (SDL_PollEvent(&sdl_event))
         {
             if (sdl_event.type == SDL_KEYUP && sdl_event.key.keysym.scancode == SDL_SCANCODE_SPACE)
             {
-                if (state_ == NodeState::WAITING_FOR_START) {
-                    ROS_INFO("Spacebar pressed. Starting experiment publishing.");
-                    state_ = NodeState::PUBLISHING_DATA;
-                    csv_index_ = 0; // Reset index for the new run
-                    experiment_id_ = getCurrentTimestamp(); // Generate a unique ID for this run
-                } else if (state_ == NodeState::EXPERIMENT_DONE) {
+                if (node_state_ == NodeState::WAITING_FOR_START) {
+                    ROS_INFO("Spacebar pressed. Starting experiment.");
+                    node_state_ = NodeState::EXPERIMENT_RUNNING;
+                    frame_counter_ = 0;
+                    prev_pos_ = cv::Point2f(0.0f, 0.0f);
+                    new_pos_ = cv::Point2f(0.0f, 0.0f);
+                    experiment_id_ = getCurrentTimestamp();
+                } else if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
+                    ROS_INFO("Spacebar pressed. Stopping experiment.");
+                    publishCalculatedData(true);
+                    node_state_ = NodeState::EXPERIMENT_DONE;
+                } else if (node_state_ == NodeState::EXPERIMENT_DONE) {
                     ROS_INFO("Spacebar pressed. Resetting for a new experiment.");
-                    state_ = NodeState::WAITING_FOR_START;
+                    node_state_ = NodeState::WAITING_FOR_START;
                 }
             }
             else if (gl_window_ && sdl_event.type == SDL_WINDOWEVENT && SDL_GetWindowFromID(sdl_event.window.windowID) == gl_window_->window)
@@ -271,10 +397,10 @@ int main(int argc, char** argv)
 {
     ros::init(argc, argv, "experiment_controller_node");
     ros::NodeHandle nh;
-    ros::NodeHandle pnh("~"); // Use a private node handle for parameters
+    ros::NodeHandle pnh("~");
 
     ExperimentController::ControllerNode node(nh, pnh);
-    node.spin(); // The main loop is now controlled by the class
+    node.spin();
 
     return 0;
 }

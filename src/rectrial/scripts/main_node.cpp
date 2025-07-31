@@ -123,28 +123,6 @@ TrackerNode::TrackerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     image_sub_ = nh_.subscribe("/imager_c", 1, &TrackerNode::imageCallback, this);
     state_sub_ = nh_.subscribe("set_state", 10, &TrackerNode::stateCallback, this);
 
-/*     // --- 3. Load CSV data ---
-    std::ifstream fin(csv_file_path_);
-    if (!fin.is_open())
-    {
-        ROS_FATAL_STREAM("Could not open positions CSV file: " << csv_file_path_);
-        ros::shutdown();
-        return;
-    }
-
-    std::string line;
-    while (std::getline(fin, line))
-    {
-        if (!line.empty()) {
-            csv_lines_.push_back(line);
-        }
-    }
-    fin.close();
-
-    if (csv_lines_.empty()) {
-        ROS_WARN("CSV file is empty. Experiment may not run correctly.");
-    } */
-
     ROS_INFO("TrackerNode initialized. Waiting for image and object selection...");
     
     // --- 4. Initialize Display ---
@@ -162,44 +140,6 @@ TrackerNode::~TrackerNode()
     }
     cv::destroyAllWindows();
 }
-
-/* void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
-{
-    try
-    {
-        // Convert ROS image from the custom message to OpenCV Mat
-        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_p, sensor_msgs::image_encodings::MONO8);
-        cv::Mat frame = cv_ptr->image;
-
-        if (frame.empty()) {
-            ROS_WARN("Received an empty image frame in callback.");
-            return;
-        }
-        processImage(frame.clone()); // Use a clone to avoid modifying the original
-    }
-    catch (const cv_bridge::Exception& e)
-    {
-        ROS_ERROR("cv_bridge exception in callback: %s", e.what());
-    }
-} */
-
-/* void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
-{
-    try
-    {
-        // This is the only place we convert the message to a CV Mat
-        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg->image_p, sensor_msgs::image_encodings::MONO8);
-        
-        // Use a lock to safely write to the shared frame variable
-        std::lock_guard<std::mutex> lock(frame_mutex_);
-        latest_frame_ = cv_ptr->image.clone();
-        new_frame_available_ = true;
-    }
-    catch (const cv_bridge::Exception& e)
-    {
-        ROS_ERROR("cv_bridge exception in callback: %s", e.what());
-    }
-} */
 
 void TrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
 {
@@ -306,64 +246,6 @@ void TrackerNode::updateTracking(const cv::Mat& frame)
     cv::putText(frame, "Frame: " + std::to_string(csv_index_), cv::Point(25, 25), cv::FONT_HERSHEY_SIMPLEX, 0.8, CV_RGB(200, 200, 200), 2);
 }
 
-/* void TrackerNode::publishData(const sensor_msgs::ImageConstPtr& original_msg, const cv::Mat& processed_frame)
-{
-    if (csv_lines_.empty() || csv_index_ >= csv_lines_.size()) {
-        ROS_WARN("Attempted to publish data but CSV data is exhausted.");
-        state_ = NodeState::EXPERIMENT_DONE;
-        return;
-    }
-
-     // --- Publish Experiment Control Message (to the Motor Node) ---
-     rectrial::pub_data experiment_msg;
-     experiment_msg.video_name_p = experiment_id_;
-     experiment_msg.data_e = csv_lines_[csv_index_];
-     experiment_msg.image_p = *original_msg;
- 
-     // ===================================================================
-     // V V V V V V V V V  THE CRITICAL CHANGE IS HERE  V V V V V V V V V V V
-     //
-     // Populate the target_pos_x field with the live tracking data.
-     // This sends the fish's position to the motor node for closed-loop control.
-     experiment_msg.target_pos_x = current_offset_.x;
-     //
-     // ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^
-     // ===================================================================
-     
-     if (csv_index_ == 0) {
-         experiment_msg.finish_c = "start";
-     } else if (csv_index_ >= csv_lines_.size() - 1) {
-         experiment_msg.finish_c = "end";
-     } else {
-         experiment_msg.finish_c = "null";
-     }
-     // This is the publisher the motor node listens to.
-     experiment_pub_.publish(experiment_msg);
- 
-     // --- Publish Processed Data Message (for visualization/debugging) ---
-     // This part remains the same.
-     rectrial::pub_data processed_msg;
-     processed_msg.video_name_p = experiment_id_ + "_processed";
-     processed_msg.data_e = std::to_string(current_offset_.x) + "," + std::to_string(current_offset_.y);
-     processed_msg.target_pos_x = current_offset_.x;
-     processed_msg.finish_c = experiment_msg.finish_c;
-     
-     std_msgs::Header header;
-     header.stamp = ros::Time::now();
-     sensor_msgs::ImagePtr image_msg = cv_bridge::CvImage(header, "mono8", processed_frame).toImageMsg();
-     processed_msg.image_e = *image_msg;
- 
-     processed_pub_.publish(processed_msg);
-
-    // --- Update state for next iteration ---
-    csv_index_++;
-    if (csv_index_ >= csv_lines_.size()) {
-        ROS_INFO("Experiment finished.");
-        state_ = NodeState::EXPERIMENT_DONE;
-    }
-}*/
-
-
 void TrackerNode::stateCallback(const std_msgs::String::ConstPtr& msg)
 {
     if (msg->data == "shutdown")
@@ -424,84 +306,6 @@ std::string TrackerNode::getCurrentTimestamp()
     ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
     return ss.str();
 }
-
-/* void TrackerNode::spin()
-{
-    ros::Rate rate(25); // Control the loop rate to 25 Hz
-    rectrial::pub_data::ConstPtr last_custom_msg;
-
-    while (ros::ok())
-    {
-
-        // =========================================================
-        // 1. Record the start time at the beginning of the loop
-        auto start_time = std::chrono::steady_clock::now();
-        // =========================================================
-
-        // Get the latest image message that the callback has received
-        last_custom_msg = ros::topic::waitForMessage<rectrial::pub_data>("/imager_c", nh_, ros::Duration(1.0));
-
-        if (last_custom_msg) {
-            // Create a shared_ptr to the image part of the message to pass to other functions
-            sensor_msgs::ImageConstPtr last_image_msg = boost::make_shared<const sensor_msgs::Image>(last_custom_msg->image_p);
-
-            // Convert and process the image to update state and visuals
-            try {
-                cv::Mat frame = cv_bridge::toCvShare(last_image_msg, "mono8")->image;
-                if (!frame.empty()) {
-                    processImage(frame.clone());
-                }
-            } catch (const cv_bridge::Exception& e) {
-                ROS_ERROR("cv_bridge exception in main loop: %s", e.what());
-            }
-
-            // Handle publishing based on state
-            if (state_ == NodeState::TRACKING) {
-                 cv::Mat processed_frame = cv_bridge::toCvShare(last_image_msg, "mono8")->image.clone();
-                 updateTracking(processed_frame); // Redraw tracking on the frame to be published
-                 publishData(last_image_msg, processed_frame);
-            }
-        } else {
-            ROS_WARN_THROTTLE(5.0, "No image received on /imager_c for over 1 second.");
-        }
-
-        // Handle keyboard input from SDL
-        SDL_Event sdl_event;
-        while (SDL_PollEvent(&sdl_event))
-        {
-            if (sdl_event.type == SDL_KEYUP && sdl_event.key.keysym.scancode == SDL_SCANCODE_SPACE)
-            {
-                if (state_ == NodeState::WAITING_FOR_START) {
-                    ROS_INFO("Spacebar pressed. Starting experiment.");
-                    state_ = NodeState::TRACKING;
-                    csv_index_ = 0; // Reset for this run
-                    experiment_id_ = getCurrentTimestamp(); // Generate a unique ID for this run
-                } else if (state_ == NodeState::EXPERIMENT_DONE) {
-                    ROS_INFO("Spacebar pressed. Restarting.");
-                    state_ = NodeState::WAITING_FOR_START; // Go back to waiting state
-                }
-            }
-            else if (gl_window_ && sdl_event.type == SDL_WINDOWEVENT && SDL_GetWindowFromID(sdl_event.window.windowID) == gl_window_->window)
-            {
-                gl_window_->processEvent(sdl_event);
-            }
-        }
-        
-        ros::spinOnce();
-
-        // =========================================================
-        // 2. Record the end time and calculate the duration
-        auto end_time = std::chrono::steady_clock::now();
-        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-
-        // 3. Print the processing time to the console
-        ROS_INFO("Frame processed in: %ld ms", duration_ms);
-        // =========================================================
-
-        rate.sleep();
-    }
-} */
-
 
 void TrackerNode::spin()
 {

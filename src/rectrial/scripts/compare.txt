@@ -1,0 +1,62 @@
+Here is a comparison of `experiment_controller.cpp` and `main_node.cpp`.
+
+Both files define ROS nodes that manage an experiment and use a `GLWindow` for display. However, they represent two different modes of operation: **pre-scripted (open-loop) control** versus **real-time (closed-loop) control**.
+
+### `experiment_controller.cpp`
+
+*   **Purpose:** To run a **pre-scripted experiment**. It reads a sequence of commands or positions from a CSV file and publishes them in order.
+*   **Control Method:** **Open-loop**. It sends data from the CSV file without any feedback from the camera about the fish's actual position.
+*   **Core Logic:**
+    1.  Loads a CSV file (`positions.csv`) at startup.
+    2.  Waits for the user to press the spacebar to begin.
+    3.  Once started, it iterates through each line of the CSV file, publishing the data from the file along with the current video frame to the `/imager` topic.
+    4.  It does **not** perform any image processing or object tracking. It only displays the incoming video feed with status text overlaid.
+*   **State Machine:** `WAITING_FOR_START`, `PUBLISHING_DATA`, `EXPERIMENT_DONE`.
+*   **Key Published Topic:** `imager` (`rectrial::pub_data`). This topic carries the pre-scripted data from the CSV file.
+
+### `main_node.cpp`
+
+*   **Purpose:** To run a **real-time, closed-loop experiment**. It tracks an object (the fish) in real-time and uses its position to control other parts of the system.
+*   **Control Method:** **Closed-loop**. It actively tracks the fish's position and publishes this live data, allowing another node (like a motor controller) to react to the fish's movement.
+*   **Core Logic:**
+    1.  Waits for the user to click on an object in the video feed to initialize the tracker.
+    2.  Waits for the user to press the spacebar to begin.
+    3.  Once started, it uses an OpenCV tracker (`CSRT`) to follow the selected object in each frame.
+    4.  It calculates the object's current position/offset and publishes this information on the `start_experiment` topic.
+    5.  It does **not** use a CSV file to dictate the experiment's flow; the flow is determined by the live tracking data.
+*   **State Machine:** `WAITING_FOR_SELECTION`, `WAITING_FOR_START`, `TRACKING`, `EXPERIMENT_DONE`.
+*   **Key Published Topic:** `start_experiment` (`rectrial::pub_data`). This topic carries the live position of the tracked object.
+
+### Key Differences
+
+| Feature | `experiment_controller.cpp` | `main_node.cpp` |
+| :--- | :--- | :--- |
+| **Control Strategy** | **Open-Loop** (Pre-scripted from CSV) | **Closed-Loop** (Real-time tracking) |
+| **Core Function** | Reads and publishes CSV data | Tracks an object and publishes its position |
+| **Image Processing** | None (only displays video) | Yes (CSRT object tracking) |
+| **User Interaction** | Press spacebar to start | Click to select object, then spacebar to start |
+| **Primary Output** | Publishes data from a file | Publishes live tracking data |
+| **Key Publisher** | `experiment_data_pub_` (to `/imager`) | `experiment_pub_` (to `/start_experiment`) |
+
+### Summary
+
+`experiment_controller.cpp` is the "conductor" for a rehearsed performance, playing back a script from a CSV file.
+
+`main_node.cpp` is the "improviser" that reacts to the live performance, tracking the fish's every move and sending that information out to be used by other nodes. They are two distinct modes for running experiments within the same framework.
+
+---
+
+### `main_node.cpp` vs. `real_time_tracker.cpp`
+
+`main_node.cpp` is a more specialized and complex node that is part of a larger experimental setup. It combines object tracking with experiment control. `real_time_tracker.cpp` is a more general-purpose, simpler node that focuses solely on real-time object tracking and visualization.
+
+| Feature | `main_node.cpp` | `real_time_tracker.cpp` |
+| :--- | :--- | :--- |
+| **Purpose** | Experiment control and tracking | Real-time tracking |
+| **Experiment Logic** | Yes (reads CSV, publishes start_experiment) | No |
+| **Display** | Custom `GLWindow` | Standard OpenCV `imshow` |
+| **State Machine** | More complex (4 states) | Simpler (3 states) |
+| **Published Topics** | `start_experiment`, `imager_processed` | `imager_processed` |
+| **Code Complexity** | Higher | Lower |
+
+It seems like `real_time_tracker.cpp` could be a simplified version of `main_node.cpp`, or perhaps a preliminary version that was later expanded upon to create the full experiment control node.

@@ -182,7 +182,7 @@ void OnlineTrackerNode::initializeTracker(const cv::Mat& frame)
     MouseParams mouse_params;
     cv::setMouseCallback(SELECTION_WINDOW_NAME_, onMouse, &mouse_params);
 
-    ROS_INFO("Please select the object to track by clicking on it.");
+    ROS_INFO("Please select the fish to track by clicking on it.");
     
     // This loop waits for the user to click. It blocks execution,
     // but this is acceptable for a one-time setup step.
