@@ -7,6 +7,7 @@
 #include <sensor_msgs/image_encodings.h>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <geometry_msgs/PointStamped.h>
 
 // Custom message
 #include <rectrial/pub_data.h>
@@ -55,7 +56,7 @@ public:
 private:
     // Callbacks
     void fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
-    void refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
+    void refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void motorCommandCallback(const std_msgs::String::ConstPtr& msg);
 
@@ -113,7 +114,7 @@ ControllerNode::ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     // Subscribe to the fish tracker
     fish_tracker_sub_ = nh_.subscribe("/imager_processed", 5, &ControllerNode::fishTrackerCallback, this);
     // Subscribe to the NEW refuge tracker
-    refuge_tracker_sub_ = nh_.subscribe("/refuge_data", 5, &ControllerNode::refugeTrackerCallback, this);
+    refuge_tracker_sub_ = nh_.subscribe("/refuge_state", 5, &ControllerNode::refugeStateCallback, this);
     
     state_sub_ = nh_.subscribe("set_state", 10, &ControllerNode::stateCallback, this);
     motor_command_sub_ = nh_.subscribe("set_motor_freq", 10, &ControllerNode::motorCommandCallback, this);
@@ -168,12 +169,24 @@ void ControllerNode::fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg
 }
 
 // NEW Callback for data from the RefugeTrackerNode
-void ControllerNode::refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg)
+/* void ControllerNode::refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg)
 {
     refuge_pos_ = parsePosition(msg->data_e);
     if (!has_refuge_data_) {
         has_refuge_data_ = true;
         ROS_INFO("Received first data packet from refuge tracker.");
+    }
+} */
+
+void ControllerNode::refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg)
+{
+    // The position is directly available in the message, no parsing needed
+    refuge_pos_.x = msg->point.x;
+    refuge_pos_.y = msg->point.y;
+
+    if (!has_refuge_data_) {
+        has_refuge_data_ = true;
+        ROS_INFO("Received first data packet from refuge state (epos_node).");
     }
 }
 
@@ -316,16 +329,16 @@ std::string ControllerNode::controlModeToString()
 
 void ControllerNode::spin()
 {
-    ros::Rate rate(60);
+    ros::Rate rate(25);
 
     while (ros::ok())
     {
         ros::spinOnce();
 
-        // Check if we can transition from waiting for data to ready
-        if (node_state_ == NodeState::WAITING_FOR_DATA && has_fish_data_ && has_refuge_data_) {
+        // <<< FIX: The condition to start is now ONLY dependent on the fish tracker.
+        if (node_state_ == NodeState::WAITING_FOR_DATA && has_fish_data_) {
             node_state_ = NodeState::WAITING_FOR_START;
-            ROS_INFO("All tracker data received. Ready to start experiment.");
+            ROS_INFO("Fish tracker data received. Ready to start experiment.");
         }
 
         if (last_fish_tracker_msg_) {
@@ -335,10 +348,6 @@ void ControllerNode::spin()
                     
                     if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
                         
-                        // Example of using both data points: calculate distance
-                        double distance = cv::norm(fish_pos_ - refuge_pos_);
-                        // ROS_INFO_THROTTLE(1.0, "Distance to refuge: %f", distance);
-
                         if (control_mode_ == ControlMode::CLOSED_LOOP_GAIN) {
                             new_pos_ = (fish_pos_ * gain_) + prev_pos_;
                         } else {

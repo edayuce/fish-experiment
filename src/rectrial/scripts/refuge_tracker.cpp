@@ -132,7 +132,7 @@ void RefugeTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Heade
         {
             cv::Mat display_frame = frame.clone();
 
-            cv::rectangle(display_frame, refuge_bbox_, cv::Scalar(0, 255, 0), 2);
+            cv::rectangle(display_frame, refuge_bbox_, cv::Scalar(255, 0, 0), 2);
             
             cv::Point center(refuge_bbox_.x + refuge_bbox_.width / 2, refuge_bbox_.y + refuge_bbox_.height / 2);
             cv::circle(display_frame, center, 4, cv::Scalar(0, 255, 0), -1);
