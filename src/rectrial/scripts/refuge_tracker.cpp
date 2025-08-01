@@ -51,7 +51,7 @@ public:
 
 private:
     // Callbacks
-    void imageCallback(const sensor_msgs::ImageConstPtr& msg);
+    void imageCallback(const rectrial::pub_data::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
 
     // Core logic
@@ -60,7 +60,7 @@ private:
 
     // ROS Communication
     ros::NodeHandle nh_;
-    image_transport::Subscriber image_sub_;
+    ros::Subscriber image_sub_;
     ros::Subscriber state_sub_;
     ros::Publisher refuge_data_pub_;
 
@@ -83,8 +83,8 @@ RefugeTrackerNode::RefugeTrackerNode(ros::NodeHandle& nh)
     nh_.param<int>("refuge_height", BBOX_HEIGHT_, 50);
 
     // --- Setup Subscribers and Publishers ---
-    image_transport::ImageTransport it(nh_);
-    image_sub_ = it.subscribe("/imager_c", 1, &RefugeTrackerNode::imageCallback, this);
+    //ros::NodeHandle it(nh_);
+    image_sub_ = nh_.subscribe<rectrial::pub_data>("/imager_c", 1, &RefugeTrackerNode::imageCallback, this);
     state_sub_ = nh_.subscribe("/set_state", 10, &RefugeTrackerNode::stateCallback, this);
     
     refuge_data_pub_ = nh_.advertise<rectrial::pub_data>("/refuge_data", 10);
@@ -97,17 +97,17 @@ RefugeTrackerNode::~RefugeTrackerNode()
     cv::destroyAllWindows();
 }
 
-void RefugeTrackerNode::imageCallback(const sensor_msgs::ImageConstPtr& msg)
+void RefugeTrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
 {
     try
     {
-        cv::Mat frame = cv_bridge::toCvShare(msg, "mono8")->image;
+        cv::Mat frame = cv_bridge::toCvShare(msg-> image_p, msg, "mono8")->image;
         if (frame.empty())
         {
             ROS_WARN("Received an empty image frame.");
             return;
         }
-        processFrame(frame, msg->header);
+        processFrame(frame, msg->image_p.header);
     }
     catch (const cv_bridge::Exception& e)
     {

@@ -1,43 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Generated with glade 3.22.1 -->
+<!-- Generated with glade 3.40.0 -->
 <interface>
   <requires lib="gtk+" version="3.20"/>
   <object class="GtkAdjustment" id="adjustment1">
-    <property name="upper">2.2000000000000002</property>
-    <property name="value">0.10000000000000001</property>
-    <property name="step_increment">0.050000000000000003</property>
-    <property name="page_increment">0.050000000000000003</property>
+    <property name="lower">0.10</property>
+    <property name="upper">2.20</property>
+    <property name="value">0.10</property>
+    <property name="step-increment">0.05</property>
+    <property name="page-increment">0.05</property>
   </object>
   <object class="GtkAdjustment" id="adjustment2">
-    <property name="upper">2.2000000000000002</property>
-    <property name="step_increment">0.050000000000000003</property>
-    <property name="page_increment">0.050000000000000003</property>
-  </object>
-  <object class="GtkAdjustment" id="adjustment3">
-    <property name="upper">2.2000000000000002</property>
-    <property name="step_increment">0.050000000000000003</property>
-    <property name="page_increment">0.050000000000000003</property>
-  </object>
-  <object class="GtkAdjustment" id="adjustment4">
-    <property name="upper">2.2000000000000002</property>
-    <property name="step_increment">0.050000000000000003</property>
-    <property name="page_increment">0.050000000000000003</property>
-  </object>
-  <object class="GtkAdjustment" id="adjustment5">
-    <property name="upper">2.2000000000000002</property>
-    <property name="step_increment">0.050000000000000003</property>
-    <property name="page_increment">0.050000000000000003</property>
-  </object>
-  <object class="GtkAdjustment" id="adjustment6">
-    <property name="upper">2.2000000000000002</property>
-    <property name="step_increment">0.050000000000000003</property>
-    <property name="page_increment">0.050000000000000003</property>
-  </object>
-  <object class="GtkAdjustment" id="adjustment7">
-    <property name="upper">10000</property>
-    <property name="value">500</property>
-    <property name="step_increment">25</property>
-    <property name="page_increment">25</property>
+    <property name="lower">-10</property>
+    <property name="upper">10</property>
+    <property name="step-increment">0.05</property>
+    <property name="page-increment">0.05</property>
   </object>
   <object class="GtkListStore" id="liststore1">
     <columns>
@@ -46,42 +22,33 @@
     </columns>
     <data>
       <row>
-        <col id="0" translatable="yes">electro</col>
+        <col id="0" translatable="yes">Luminous</col>
       </row>
       <row>
-        <col id="0" translatable="yes">visual</col>
+        <col id="0" translatable="yes">Loess</col>
       </row>
       <row>
-        <col id="0" translatable="yes">electrovisual</col>
-      </row>
-      <row>
-        <col id="0" translatable="yes">test-electro</col>
-      </row>
-      <row>
-        <col id="0" translatable="yes">test-visual</col>
+        <col id="0" translatable="yes">Dark</col>
       </row>
     </data>
   </object>
   <object class="GtkWindow" id="FishExperiment">
-    <property name="height_request">100</property>
-    <property name="can_focus">False</property>
-    <child>
-      <placeholder/>
-    </child>
+    <property name="height-request">100</property>
+    <property name="can-focus">False</property>
     <child>
       <object class="GtkFixed">
-        <property name="height_request">292</property>
+        <property name="height-request">292</property>
         <property name="visible">True</property>
-        <property name="can_focus">False</property>
+        <property name="can-focus">False</property>
         <property name="halign">center</property>
         <child>
           <object class="GtkButton" id="start_cam">
             <property name="label" translatable="yes">Start Streaming</property>
-            <property name="width_request">150</property>
-            <property name="height_request">50</property>
+            <property name="width-request">150</property>
+            <property name="height-request">50</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">True</property>
             <property name="halign">center</property>
           </object>
           <packing>
@@ -91,11 +58,11 @@
         <child>
           <object class="GtkButton" id="kill_cam">
             <property name="label" translatable="yes">Stop Streaming</property>
-            <property name="width_request">150</property>
-            <property name="height_request">50</property>
+            <property name="width-request">150</property>
+            <property name="height-request">50</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">True</property>
             <property name="halign">center</property>
           </object>
           <packing>
@@ -106,11 +73,11 @@
         <child>
           <object class="GtkButton" id="start_webcam">
             <property name="label" translatable="yes">Webcam Mode</property>
-            <property name="width_request">100</property>
-            <property name="height_request">20</property>
+            <property name="width-request">100</property>
+            <property name="height-request">20</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">True</property>
             <property name="halign">center</property>
           </object>
           <packing>
@@ -118,11 +85,62 @@
           </packing>
         </child>
         <child>
-          <object class="GtkLabel">
-            <property name="width_request">100</property>
-            <property name="height_request">10</property>
+          <object class="GtkSpinButton" id="freq_config">
+            <property name="width-request">120</property>
+            <property name="height-request">10</property>
             <property name="visible">True</property>
-            <property name="can_focus">False</property>
+            <property name="can-focus">True</property>
+            <property name="text" translatable="yes">0,2</property>
+            <property name="input-purpose">number</property>
+            <property name="adjustment">adjustment1</property>
+            <property name="climb-rate">0.05</property>
+            <property name="digits">2</property>
+            <property name="numeric">True</property>
+            <property name="update-policy">if-valid</property>
+            <property name="value">0.20</property>
+          </object>
+          <packing>
+            <property name="x">100</property>
+            <property name="y">150</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="width-request">100</property>
+            <property name="height-request">10</property>
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
+            <property name="label" translatable="yes">   Frequency:   </property>
+            <attributes>
+              <attribute name="weight" value="bold"/>
+            </attributes>
+          </object>
+          <packing>
+            <property name="x">2</property>
+            <property name="y">157</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="width-request">100</property>
+            <property name="height-request">10</property>
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
+            <property name="label" translatable="yes">-----------------------------------------------------------------------------</property>
+            <attributes>
+              <attribute name="foreground" value="#000000000000"/>
+            </attributes>
+          </object>
+          <packing>
+            <property name="y">205</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="width-request">100</property>
+            <property name="height-request">10</property>
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
             <property name="label" translatable="yes">-----------------------------------------------------------------------------</property>
             <attributes>
               <attribute name="foreground" value="#000000000000"/>
@@ -133,15 +151,29 @@
           </packing>
         </child>
         <child>
-          <object class="GtkComboBox" id="mode_config">
-            <property name="width_request">120</property>
-            <property name="height_request">40</property>
+          <object class="GtkButton" id="set_freq">
+            <property name="label" translatable="yes">SET</property>
+            <property name="width-request">60</property>
+            <property name="height-request">31</property>
             <property name="visible">True</property>
-            <property name="can_focus">False</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">True</property>
+          </object>
+          <packing>
+            <property name="x">235</property>
+            <property name="y">150</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkComboBox" id="mode_config">
+            <property name="width-request">155</property>
+            <property name="height-request">30</property>
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
             <property name="model">liststore1</property>
             <property name="active">0</property>
-            <property name="button_sensitivity">on</property>
-            <property name="id_column">0</property>
+            <property name="button-sensitivity">on</property>
+            <property name="id-column">0</property>
             <child>
               <object class="GtkCellRendererText"/>
               <attributes>
@@ -150,173 +182,148 @@
             </child>
           </object>
           <packing>
-            <property name="x">93</property>
-            <property name="y">101</property>
+            <property name="x">140</property>
+            <property name="y">100</property>
           </packing>
         </child>
         <child>
-          <object class="GtkRadioButton" id="left_radio_button">
-            <property name="label" translatable="yes">left</property>
-            <property name="width_request">110</property>
-            <property name="height_request">40</property>
+          <object class="GtkLabel">
+            <property name="width-request">100</property>
+            <property name="height-request">5</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">False</property>
-            <property name="active">True</property>
-            <property name="draw_indicator">True</property>
+            <property name="can-focus">False</property>
+            <property name="label" translatable="yes">-----------------------------------------------------------------------------</property>
+            <attributes>
+              <attribute name="foreground" value="#000000000000"/>
+            </attributes>
           </object>
           <packing>
-            <property name="x">35</property>
-            <property name="y">143</property>
+            <property name="y">130</property>
           </packing>
         </child>
         <child>
-          <object class="GtkRadioButton" id="right_radio_button">
-            <property name="label" translatable="yes">right</property>
-            <property name="width_request">110</property>
-            <property name="height_request">40</property>
+          <object class="GtkLabel">
+            <property name="width-request">100</property>
+            <property name="height-request">10</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">False</property>
-            <property name="active">True</property>
-            <property name="draw_indicator">True</property>
-            <property name="group">left_radio_button</property>
+            <property name="can-focus">False</property>
+            <property name="label" translatable="yes">   Object to Move:   </property>
+            <attributes>
+              <attribute name="weight" value="bold"/>
+            </attributes>
           </object>
           <packing>
-            <property name="x">165</property>
-            <property name="y">142</property>
-          </packing>
-        </child>
-        <child>
-          <object class="GtkEntry" id="freq_config">
-            <property name="width_request">100</property>
-            <property name="height_request">30</property>
-            <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="text" translatable="yes">0.20</property>
-          </object>
-          <packing>
-            <property name="x">10</property>
-            <property name="y">190</property>
-          </packing>
-        </child>
-        <child>
-          <object class="GtkButton" id="set_freq">
-            <property name="label" translatable="yes">Set Frequency</property>
-            <property name="width_request">100</property>
-            <property name="height_request">30</property>
-            <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">True</property>
-          </object>
-          <packing>
-            <property name="x">120</property>
-            <property name="y">190</property>
+            <property name="x">2</property>
+            <property name="y">107</property>
           </packing>
         </child>
         <child>
           <object class="GtkCheckButton" id="sum_of_sines">
-            <property name="label" translatable="yes">Sum of Sines</property>
-            <property name="width_request">100</property>
-            <property name="height_request">30</property>
+            <property name="label" translatable="yes">sum of sines</property>
+            <property name="width-request">90</property>
+            <property name="height-request">30</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">False</property>
-            <property name="draw_indicator">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">False</property>
+            <property name="image-position">top</property>
+            <property name="draw-indicator">True</property>
           </object>
           <packing>
-            <property name="x">10</property>
-            <property name="y">230</property>
+            <property name="x">99</property>
+            <property name="y">180</property>
           </packing>
         </child>
         <child>
-          <object class="GtkCheckButton" id="open_loop">
-            <property name="label" translatable="yes">Open Loop</property>
-            <property name="width_request">100</property>
-            <property name="height_request">30</property>
+          <object class="GtkSpinButton" id="gain_config">
+            <property name="width-request">100</property>
+            <property name="height-request">40</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">False</property>
-            <property name="draw_indicator">True</property>
+            <property name="can-focus">True</property>
+            <property name="adjustment">adjustment2</property>
+            <property name="climb-rate">0.05</property>
+            <property name="digits">3</property>
+            <property name="numeric">True</property>
+            <property name="value">1</property>
           </object>
           <packing>
-            <property name="x">120</property>
-            <property name="y">230</property>
+            <property name="x">180</property>
+            <property name="y">220</property>
           </packing>
         </child>
         <child>
-          <object class="GtkCheckButton" id="closed_loop">
-            <property name="label" translatable="yes">Closed Loop</property>
-            <property name="width_request">100</property>
-            <property name="height_request">30</property>
+          <object class="GtkLabel" id="gain_label">
+            <property name="width-request">110</property>
+            <property name="height-request">40</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">False</property>
-            <property name="draw_indicator">True</property>
+            <property name="can-focus">False</property>
+            <property name="label" translatable="yes">Reafferent Gain:</property>
           </object>
           <packing>
-            <property name="x">10</property>
-            <property name="y">270</property>
-          </packing>
-        </child>
-        <child>
-          <object class="GtkEntry" id="gain_config">
-            <property name="width_request">100</property>
-            <property name="height_request">30</property>
-            <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="text" translatable="yes">1.0</property>
-          </object>
-          <packing>
-            <property name="x">120</property>
-            <property name="y">270</property>
+            <property name="x">20</property>
+            <property name="y">220</property>
           </packing>
         </child>
         <child>
           <object class="GtkCheckButton" id="gain_check">
-            <property name="label" translatable="yes">Set Gain</property>
-            <property name="width_request">100</property>
-            <property name="height_request">30</property>
+            <property name="label" translatable="yes">use</property>
+            <property name="width-request">40</property>
+            <property name="height-request">40</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">False</property>
-            <property name="draw_indicator">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">False</property>
+            <property name="draw-indicator">True</property>
+          </object>
+          <packing>
+            <property name="x">130</property>
+            <property name="y">220</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="open_loop">
+            <property name="label" translatable="yes">open-loop</property>
+            <property name="width-request">100</property>
+            <property name="height-request">20</property>
+            <property name="visible">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">False</property>
+            <property name="draw-indicator">True</property>
           </object>
           <packing>
             <property name="x">10</property>
-            <property name="y">310</property>
+            <property name="y">260</property>
           </packing>
         </child>
         <child>
           <object class="GtkCheckButton" id="openloop_gain">
-            <property name="label" translatable="yes">Open Loop Gain</property>
-            <property name="width_request">120</property>
-            <property name="height_request">30</property>
+            <property name="label" translatable="yes">openloop_gain</property>
+            <property name="width-request">100</property>
+            <property name="height-request">20</property>
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="receives_default">False</property>
-            <property name="draw_indicator">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">False</property>
+            <property name="draw-indicator">True</property>
           </object>
           <packing>
-            <property name="x">120</property>
-            <property name="y">310</property>
+            <property name="x">175</property>
+            <property name="y">277</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="closed_loop">
+            <property name="label" translatable="yes">closed-loop</property>
+            <property name="width-request">100</property>
+            <property name="height-request">20</property>
+            <property name="visible">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">False</property>
+            <property name="draw-indicator">True</property>
+          </object>
+          <packing>
+            <property name="x">10</property>
+            <property name="y">290</property>
           </packing>
         </child>
       </object>
     </child>
-  </object>
-  <object class="GtkListStore" id="my_list">
-    <columns>
-      <!-- column-name value -->
-      <column type="gchararray"/>
-    </columns>
-    <data>
-      <row>
-        <col id="0" translatable="yes">asasd</col>
-      </row>
-      <row>
-        <col id="0" translatable="yes">asdasdasd</col>
-      </row>
-    </data>
   </object>
 </interface>

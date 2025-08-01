@@ -12,9 +12,8 @@
 #include <thread>
 #include <fstream>
 #include <csignal>
+#include <sstream> // <<< FIX: Added for std::stringstream to parse strings
 
-// FIX 1: Add the missing typedef for BOOL.
-// This type is used by the EPOS library functions.
 typedef int BOOL;
 
 // Use named constants instead of magic numbers
@@ -26,29 +25,20 @@ const int NUM_SINE_FREQUENCIES = 13;
 class MaxonMotorController
 {
 public:
-    // Constructor: Initializes the node, parameters, and hardware.
-    MaxonMotorController() : nh_("~") // Private node handle for parameters
+    MaxonMotorController() : nh_("~")
     {
-        // Load all parameters from the ROS Parameter Server
         loadParams();
 
         // Initialize ROS subscribers and publishers
         sub_motor_freq_ = root_nh_.subscribe("/set_motor_freq", 10, &MaxonMotorController::motorSetFreqCallback, this);
         sub_state_ = root_nh_.subscribe("/set_state", 10, &MaxonMotorController::stateCallback, this);
-        sub_experiment_trigger_ = root_nh_.subscribe("/start_experiment", 100, &MaxonMotorController::imageCallback, this);
+        
+        // <<< FIX 1: The node now subscribes to "/imager", which is the correct topic for motor commands from the controller.
+        sub_experiment_trigger_ = root_nh_.subscribe("/imager", 100, &MaxonMotorController::imageCallback, this);
+        
         refuge_state_pub_ = root_nh_.advertise<geometry_msgs::PointStamped>("/refuge_state", 10);
 
-
-        // --- Hardware Initialization ---
-        if (!openDevice()) {
-            ros::shutdown();
-            return;
-        }
-        if (!prepareMotor()) {
-            ros::shutdown();
-            return;
-        }
-        if (!initializeMotor()) {
+        if (!openDevice() || !prepareMotor() || !initializeMotor()) {
             ros::shutdown();
             return;
         }
@@ -56,7 +46,6 @@ public:
         ROS_INFO("Maxon motor node initialized successfully.");
     }
 
-    // Destructor: Ensures the device is properly closed.
     ~MaxonMotorController()
     {
         if (key_handle_) {
@@ -68,39 +57,27 @@ public:
     }
 
 private:
-    // =========================================================================
-    // ROS Members
-    // =========================================================================
     ros::NodeHandle root_nh_;
     ros::Publisher refuge_state_pub_;
-    ros::NodeHandle nh_; // Private NodeHandle for parameters
+    ros::NodeHandle nh_; 
     ros::Subscriber sub_motor_freq_;
-    // FIX 2: Declare the subscriber variable that was missing.
     ros::Subscriber sub_experiment_trigger_;
     ros::Subscriber sub_state_;
     
-    // =========================================================================
-    // State & Control Variables (formerly global)
-    // =========================================================================
-    // --- Control Flags ---
     bool is_open_loop_ = false;
     bool is_closed_loop_ = false;
     bool is_gain_mode_ = false;
-    bool is_sum_of_sines_ = false; // Default state
+    bool is_sum_of_sines_ = false;
 
-    // --- Kinematic & Gain Parameters ---
     double reafferent_gain_ = 0.0;
     double gain_limit_ = 10.0;
     double frequency_ = 2.05;
     double amp_mm_ = 10.0;
     
-    // --- Time & Counters ---
     std::chrono::steady_clock::time_point loop_start_time_;
-    std::chrono::steady_clock::time_point self_time_start_;
     int frame_counter_ = 0;
     int overshoot_counter_ = 0;
 
-    // --- Motor & Device Parameters ---
     void* key_handle_ = nullptr;
     unsigned short node_id_ = 1;
     std::string device_name_;
@@ -108,18 +85,11 @@ private:
     std::string interface_name_;
     std::string port_name_;
     int baudrate_ = 0;
-    double a_pos_ = 0.0; // Calculated amplitude in motor counts
+    double a_pos_ = 0.0; 
 
-    std_msgs::Float64 refuge_msg;
     double last_refuge_position_ = 0.0;
 
-    // =========================================================================
-    // Parameter Loading Function
-    // =========================================================================
     void loadParams() {
-        // Motor configuration
-        // FIX 3: Use a temporary 'int' for nh.param, as it doesn't work directly
-        // with 'unsigned short'. Then assign the value.
         int temp_node_id = 1;
         nh_.param<int>("node_id", temp_node_id, 1);
         node_id_ = static_cast<unsigned short>(temp_node_id);
@@ -130,11 +100,9 @@ private:
         nh_.param<std::string>("port_name", port_name_, "USB0");
         nh_.param<int>("baudrate", baudrate_, 1000000);
         
-        // Motion profile
         nh_.param<double>("amplitude_mm", amp_mm_, 10.0);
         nh_.param<double>("gain_limit", gain_limit_, 10.0);
         
-        // Motor constants
         double mm_per_rev = 10.0;
         double encoder_count = 512.0;
         double gear_ratio = (624.0 / 35.0) * 4.0;
@@ -150,18 +118,10 @@ private:
         ROS_INFO("----------------------");
     }
 
-    // =========================================================================
-    // Hardware Interface Functions (Refactored)
-    // =========================================================================
     bool openDevice() {
         unsigned int error_code = 0;
         ROS_INFO("Opening device: %s...", device_name_.c_str());
-        key_handle_ = VCS_OpenDevice(
-            (char*)device_name_.c_str(), 
-            (char*)protocol_stack_name_.c_str(), 
-            (char*)interface_name_.c_str(), 
-            (char*)port_name_.c_str(), 
-            &error_code);
+        key_handle_ = VCS_OpenDevice((char*)device_name_.c_str(), (char*)protocol_stack_name_.c_str(), (char*)interface_name_.c_str(), (char*)port_name_.c_str(), &error_code);
 
         if (key_handle_ != nullptr && error_code == 0) {
             unsigned int current_baudrate = 0, timeout = 0;
@@ -178,7 +138,7 @@ private:
 
     bool prepareMotor() {
         unsigned int error_code = 0;
-        BOOL is_fault = 0; // Using the typedef'd BOOL
+        BOOL is_fault = 0;
         if (!VCS_GetFaultState(key_handle_, node_id_, &is_fault, &error_code)) {
             ROS_ERROR("VCS_GetFaultState failed. Error: 0x%X", error_code);
             return false;
@@ -192,7 +152,7 @@ private:
             }
         }
 
-        BOOL is_enabled = 0; // Using the typedef'd BOOL
+        BOOL is_enabled = 0;
         if (!VCS_GetEnableState(key_handle_, node_id_, &is_enabled, &error_code)) {
             ROS_ERROR("VCS_GetEnableState failed. Error: 0x%X", error_code);
             return false;
@@ -227,16 +187,11 @@ private:
             ROS_ERROR("Initial VCS_MoveToPosition (homing) failed. Error: 0x%X", error_code);
             return false;
         }
-        // Give it time to home
         ros::Duration(1.0).sleep(); 
         ROS_INFO("Motor initialized and at home position.");
         return true;
     }
 
-
-    // =========================================================================
-    // ROS Callbacks
-    // =========================================================================
     void stateCallback(const std_msgs::String::ConstPtr& msg) {
         if (msg->data == "shutdown") {
             ROS_INFO("Shutdown command received. Closing motor node!");
@@ -248,7 +203,6 @@ private:
         std::string cmd = msg->data;
         ROS_INFO("Received command: %s", cmd.c_str());
 
-        // Reset all flags
         is_sum_of_sines_ = false;
         is_gain_mode_ = false;
         is_open_loop_ = false;
@@ -263,11 +217,11 @@ private:
         } else if (cmd == "closedloop") {
             is_closed_loop_ = true;
             ROS_INFO("Mode switched to: Closed Loop");
-        } else if (cmd.rfind("gain:", 0) == 0) { // Check if string starts with "gain:"
+        } else if (cmd.rfind("gain:", 0) == 0) {
             is_gain_mode_ = true;
             reafferent_gain_ = std::stod(cmd.substr(5));
             ROS_INFO("Mode switched to: Gain Control with gain = %.2f", reafferent_gain_);
-        } else if (cmd.rfind("os:gain:", 0) == 0) { // Check for openloop gain
+        } else if (cmd.rfind("os:gain:", 0) == 0) {
              is_gain_mode_ = true;
              is_open_loop_ = true;
              reafferent_gain_ = std::stod(cmd.substr(8));
@@ -275,7 +229,7 @@ private:
         } else {
             try {
                 frequency_ = std::stod(cmd);
-                is_sum_of_sines_ = false; // Ensure this is false if a frequency is set
+                is_sum_of_sines_ = false;
                 ROS_INFO("Mode switched to: Single Sine with frequency = %.2f Hz", frequency_);
             } catch (const std::exception& e) {
                 ROS_WARN("Could not parse '%s' as a command or frequency.", cmd.c_str());
@@ -283,93 +237,41 @@ private:
         }
     }
 
-/*     void imageCallback(const rectrial::pub_data::ConstPtr& msg) {
-        // --- Timing and Initialization on "start" command ---
-        if (msg->finish_c == "start") {
-            loop_start_time_ = std::chrono::steady_clock::now();
-            self_time_start_ = loop_start_time_;
-            frame_counter_ = 0;
-            overshoot_counter_ = 0;
-            ROS_INFO("START command received. Resetting timers and counters.");
-            // Don't return, process this frame as the first frame
-        }
-
-        // --- Homing and Teardown on "end" command ---
-        if (msg->finish_c == "end") {
-            ROS_INFO("END command received. Homing motor.");
-            ROS_INFO("Overshoot Count: %d / %d frames.", overshoot_counter_, frame_counter_);
-            unsigned int error_code = 0;
-            // FIX 4: Corrected the function name from VCS_HaltMovement
-            VCS_HaltVelocityMovement(key_handle_, node_id_, &error_code);
-            initializeMotor(); // Re-home the motor
-            return;
-        }
-        
-        frame_counter_++;
-        
-        // --- Calculate Target Position based on current mode ---
-        double target_position_float = 0.0;
-        const auto now = std::chrono::steady_clock::now();
-        double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - loop_start_time_).count();
-
-        if (is_sum_of_sines_) {
-            target_position_float = calculateSumOfSines(time_ms);
-        } else if (is_open_loop_) {
-            target_position_float = calculateSumOfSines(time_ms);
-            if(is_gain_mode_){
-                 target_position_float += calculateGainComponent(msg->target_pos_x);
-            }
-        } else if (is_closed_loop_) {
-            target_position_float = calculateGainComponent(msg->target_pos_x);
-        } else if (is_gain_mode_) {
-            target_position_float = (a_pos_ / (2.0 * M_PI * frequency_)) * sin(2.0 * M_PI * frequency_ * time_ms / 1000.0);
-            target_position_float += calculateGainComponent(msg->target_pos_x);
-        } else {
-            target_position_float = (a_pos_ / (2.0 * M_PI * frequency_)) * sin(2.0 * M_PI * frequency_ * time_ms / 1000.0);
-        }
-
-        // --- Send command to motor ---
-        unsigned int error_code = 0;
-        long target_position = static_cast<long>(target_position_float);
-        if (!VCS_MoveToPosition(key_handle_, node_id_, target_position, 1, 1, &error_code)) {
-            ROS_ERROR("VCS_MoveToPosition failed. Error: 0x%X", error_code);
-        }
-    } */
-
-
     void imageCallback(const rectrial::pub_data::ConstPtr& msg)
     {
         if (msg->finish_c == "start") {
             loop_start_time_ = std::chrono::steady_clock::now();
-            // Reset the refuge position at the start of each trial
             last_refuge_position_ = 0.0;
             frame_counter_ = 0;
             ROS_INFO("START command received. Resetting position and timers.");
         }
-            // --- Homing and Teardown on "end" command ---
+        
         if (msg->finish_c == "end") {
             ROS_INFO("END command received. Homing motor.");
-            ROS_INFO("Overshoot Count: %d / %d frames.", overshoot_counter_, frame_counter_);
             unsigned int error_code = 0;
-            // FIX 4: Corrected the function name from VCS_HaltMovement
             VCS_HaltVelocityMovement(key_handle_, node_id_, &error_code);
-            initializeMotor(); // Re-home the motor
+            initializeMotor();
             return;
         }
 
         frame_counter_++;
         double target_position_float = 0.0;
 
-        // This is the main logic switch
         if (is_gain_mode_ || is_closed_loop_) 
         {
-            // --- This is the new dynamic logic ---
-            double fish_position = msg->target_pos_x;
-
-            // 1. Calculate the new target position using your formula
-            target_position_float = (fish_position * reafferent_gain_) + last_refuge_position_;
-
-            // 2. Update the state for the next iteration
+            // <<< FIX 2: Correctly parse the fish position from the "x,y" string in data_e.
+            std::stringstream ss(msg->data_e);
+            std::string x_str;
+            double fish_position_x = 0.0;
+            if (std::getline(ss, x_str, ',')) {
+                 try {
+                    fish_position_x = std::stod(x_str);
+                 } catch (const std::exception& e) {
+                    ROS_ERROR("Failed to parse x-position from data_e: %s", msg->data_e.c_str());
+                 }
+            }
+            
+            target_position_float = (fish_position_x * reafferent_gain_) + last_refuge_position_;
             last_refuge_position_ = target_position_float;
         }
         else if (is_sum_of_sines_)
@@ -383,32 +285,22 @@ private:
             target_position_float = (a_pos_ / (2.0 * M_PI * frequency_)) * sin(2.0 * M_PI * frequency_ * time_ms / 1000.0);
         }
 
-        // --- Send command to motor ---
         unsigned int error_code = 0;
         long target_position = static_cast<long>(target_position_float);
         if (!VCS_MoveToPosition(key_handle_, node_id_, target_position, 1, 1, &error_code)) {
             ROS_ERROR("VCS_MoveToPosition failed. Error: 0x%X", error_code);
         }
 
-        //refuge_msg.data = target_position_float;
-        //refuge_state_pub_.publish(refuge_msg);
-
         geometry_msgs::PointStamped refuge_msg;
-        refuge_msg.header.stamp = msg->image_p.header.stamp; // Use the original image timestamp
-        refuge_msg.header.frame_id = msg->image_p.header.frame_id; // Use the original frame_id
+        refuge_msg.header.stamp = msg->image_e.header.stamp;
+        refuge_msg.header.frame_id = msg->image_e.header.frame_id;
         refuge_msg.point.x = target_position_float;
         refuge_msg.point.y = 0;
         refuge_msg.point.z = 0;
         refuge_state_pub_.publish(refuge_msg);
-
     }
 
-
-    // =========================================================================
-    // Calculation Helpers
-    // =========================================================================
     double calculateSumOfSines(double time_ms) {
-        // Constants for sum-of-sines from original code
         static const double freqs[NUM_SINE_FREQUENCIES] = {0.1, 0.15, 0.25, 0.35, 0.55, 0.65, 0.85, 0.95, 1.15, 1.45, 1.55, 1.85, 2.05};
         static const double velPH[NUM_SINE_FREQUENCIES] = {0.2162, 2.5980, 0.0991, 0.2986, 2.9446, 2.5794, 2.8213, 0.0693, 1.4556, 0.3746, 1.0430, 2.9469, 2.6706};
         
@@ -421,7 +313,6 @@ private:
     
     double calculateGainComponent(double fish_pos_x) {
         double pos_x = -reafferent_gain_ * fish_pos_x / REAFFERENT_SCALING_FACTOR;
-        // Clamp the value to the gain limit
         pos_x = std::max(-gain_limit_, std::min(gain_limit_, pos_x));
         return a_pos_ * pos_x;
     }
@@ -430,10 +321,7 @@ private:
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "epos_node");
-
     MaxonMotorController controller;
-
     ros::spin();
-
     return 0;
 }

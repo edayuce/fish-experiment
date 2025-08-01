@@ -2,6 +2,8 @@
 build/
 devel/
 deps/
+src/rectrial/logs/
+src/rectrial/videos/
 
 # Ignore temporary files
 *.swp

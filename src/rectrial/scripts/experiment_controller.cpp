@@ -308,7 +308,7 @@ std::string ControllerNode::controlModeToString()
         case ControlMode::INACTIVE:         return "Inactive";
         case ControlMode::CLOSED_LOOP_GAIN: return "ClosedLoop";
         case ControlMode::OPEN_LOOP_GAIN:   return "OpenLoop";
-        case Control_mode::FIXED_FREQ:       return "FixedFreq";
+        case ControlMode::FIXED_FREQ:       return "FixedFreq";
         case ControlMode::SUM_OF_SINES:     return "SumOfSines";
         default:                            return "Unknown";
     }
