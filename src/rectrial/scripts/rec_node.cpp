@@ -46,7 +46,7 @@ private:
     ros::Time recording_start_time_;
     cv::Size frame_size_;
     bool frame_size_initialized_ = false;
-    double fps_ = 30.0; // Default frames per second
+    double fps_ = 60.0; // Default frames per second
 
     // File paths
     std::string video_directory_;
@@ -55,7 +55,7 @@ private:
 VideoRecorderNode::VideoRecorderNode(ros::NodeHandle& nh) : nh_(nh)
 {
     // --- 1. Get Parameters ---
-    nh_.param<double>("fps", fps_, 30.0);
+    nh_.param<double>("fps", fps_, 60.0);
     
     // --- 2. Setup Video Directory ---
     std::string package_path = ros::package::getPath("rectrial");

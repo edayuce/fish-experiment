@@ -7,6 +7,7 @@
 #include <sensor_msgs/image_encodings.h>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/tracking.hpp>
 
 // Include your custom message header
 #include <rectrial/pub_data.h>
@@ -67,11 +68,13 @@ private:
     // State Management
     NodeState state_;
     cv::Rect2d refuge_bbox_; // The selected bounding box for the refuge
+    cv::Ptr<cv::Tracker> tracker_;
+
 
     // Configuration
     int BBOX_WIDTH_ = 50;
     int BBOX_HEIGHT_ = 50;
-    const std::string SELECTION_WINDOW_NAME_ = "Select Center of Refuge";
+    const std::string SELECTION_WINDOW_NAME_ = "Select Refuge";
     const std::string DISPLAY_WINDOW_NAME_ = "Refuge Location";
 };
 
@@ -130,13 +133,23 @@ void RefugeTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Heade
 
         case NodeState::PUBLISHING_DATA:
         {
+            bool ok = tracker_->update(frame, refuge_bbox_);
             cv::Mat display_frame = frame.clone();
 
-            cv::rectangle(display_frame, refuge_bbox_, cv::Scalar(255, 0, 0), 2);
-            
+            if (ok)
+            {
+                // Draw the bounding box if tracking is successful.
+                cv::rectangle(display_frame, refuge_bbox_, cv::Scalar(255, 0, 0), 2);
+            }
+            else
+            {
+                // Display a warning if the tracker lost the object.
+                cv::putText(display_frame, "Tracking Failure", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 0, 255), 2);
+            }
+
             cv::Point center(refuge_bbox_.x + refuge_bbox_.width / 2, refuge_bbox_.y + refuge_bbox_.height / 2);
             cv::circle(display_frame, center, 4, cv::Scalar(0, 255, 0), -1);
-            cv::putText(display_frame, "Refuge", cv::Point(refuge_bbox_.x, refuge_bbox_.y - 10), cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 255, 0), 2);
+            //cv::putText(display_frame, "Refuge", cv::Point(refuge_bbox_.x, refuge_bbox_.y - 10), cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 255, 0), 2);
 
             rectrial::pub_data refuge_msg;
             refuge_msg.image_e = *cv_bridge::CvImage(header, "mono8", display_frame).toImageMsg();
@@ -154,11 +167,11 @@ void RefugeTrackerNode::initializeRefuge(const cv::Mat& frame)
 {
     state_ = NodeState::SELECTING_ROI;
 
-    cv::namedWindow(SELECTION_WINDOW_NAME_, cv::WINDOW_AUTOSIZE);
+    cv::namedWindow(SELECTION_WINDOW_NAME_, cv::WINDOW_NORMAL | cv::WINDOW_GUI_EXPANDED);
     MouseParams mouse_params;
     cv::setMouseCallback(SELECTION_WINDOW_NAME_, onMouse, &mouse_params);
 
-    ROS_INFO("Please select the refuge to track by clicking on its center.");
+    ROS_INFO("Please select the refuge to track by clicking on it.");
     
     // This loop waits for the user to click.
     while (!mouse_params.clicked && ros::ok())
@@ -177,6 +190,9 @@ void RefugeTrackerNode::initializeRefuge(const cv::Mat& frame)
                                 mouse_params.point.y - (BBOX_HEIGHT_ / 2.0),
                                 BBOX_WIDTH_,
                                 BBOX_HEIGHT_);
+
+    tracker_ = cv::TrackerCSRT::create();
+    tracker_->init(frame, refuge_bbox_);
 
     cv::destroyWindow(SELECTION_WINDOW_NAME_);
     ROS_INFO("Refuge area selected. Starting continuous publishing.");

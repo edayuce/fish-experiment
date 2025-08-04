@@ -100,7 +100,7 @@ target_include_directories(Epos PUBLIC
 
 # --- Executables ---
 add_executable(basler_camera_node       scripts/camera_node.cpp)
-add_executable(experiment_controller    scripts/experiment_controller.cpp)
+add_executable(experiment_controller    scripts/experiment_controller.cpp scripts/adaptive_filter.cpp)
 add_executable(video_recorder_node      scripts/rec_node.cpp)
 add_executable(epos_node                scripts/epos_node.cpp)
 add_executable(real_time_tracker        scripts/real_time_tracker.cpp)

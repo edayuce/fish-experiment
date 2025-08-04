@@ -329,7 +329,7 @@ std::string ControllerNode::controlModeToString()
 
 void ControllerNode::spin()
 {
-    ros::Rate rate(25);
+    ros::Rate rate(30);
 
     while (ros::ok())
     {

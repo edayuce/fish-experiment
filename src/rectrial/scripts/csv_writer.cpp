@@ -54,7 +54,7 @@ DataLoggerNode::DataLoggerNode(ros::NodeHandle& nh) : nh_(nh)
     log_file_.open(log_file_path_);
     if (!log_file_.is_open()) { ROS_ERROR("Failed to open log file: %s", log_file_path_.c_str()); ros::shutdown(); return; }
     
-    log_file_ << "fish_pos_x,fish_pos_y,refuge_pos_x,refuge_pos_y,loop_time_ms\n";
+    log_file_ << "timestamp,fish_pos_x,fish_pos_y,refuge_pos_x,refuge_pos_y,loop_time_ms\n";
     ROS_INFO("Logging data to: %s", log_file_path_.c_str());
 
     // Initialize two separate, standard ROS subscribers
@@ -106,7 +106,7 @@ void DataLoggerNode::tryLogData()
     std::replace(fish_pos_str.begin(), fish_pos_str.end(), ',', ',');
 
     if (log_file_.is_open()) {
-        log_file_ 
+        log_file_ << last_fish_msg_->image_e.header.stamp << ","
                   << fish_pos_str << ","
                   << last_refuge_msg_->point.x << ","
                   << last_refuge_msg_->point.y << ","
