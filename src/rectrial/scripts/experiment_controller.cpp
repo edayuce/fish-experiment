@@ -9,72 +9,54 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <geometry_msgs/PointStamped.h>
 
-// Custom message
-#include <rectrial/pub_data.h>
+#include <memory> // Required for std::unique_ptr
 
-#include "GLWindow.h" // Assuming GLWindow.h is in the include path
+#include "adaptive_filter.h" // <<< Include the filter header
+#include "rectrial/pub_data.h"
+#include "GLWindow.h"
 
 #include <string>
 #include <vector>
 #include <iostream>
 #include <chrono>
-#include <iomanip> // For formatting time and float values
-#include <sstream> // Required for parsing strings
-#include <cmath>   // For std::sqrt
+#include <iomanip>
+#include <sstream>
+#include <cmath>
 
 namespace ExperimentController
 {
 
-// Defines the overall state of the node (controlled by spacebar)
-enum class NodeState
-{
-    WAITING_FOR_DATA, // New initial state
-    WAITING_FOR_START,
-    EXPERIMENT_RUNNING,
-    EXPERIMENT_DONE
-};
-
-// Defines the behavior during the experiment (controlled by the GUI)
-enum class ControlMode
-{
-    INACTIVE,
-    CLOSED_LOOP_GAIN, // The mode that uses: new_pos = (fish_pos * gain) + prev_pos
-    OPEN_LOOP_GAIN,
-    FIXED_FREQ,
-    SUM_OF_SINES
-};
-
+enum class NodeState { WAITING_FOR_DATA, WAITING_FOR_START, EXPERIMENT_RUNNING, EXPERIMENT_DONE };
+enum class ControlMode { INACTIVE, CLOSED_LOOP_GAIN, OPEN_LOOP_GAIN, FIXED_FREQ, SUM_OF_SINES };
 
 class ControllerNode
 {
 public:
     ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh);
     ~ControllerNode();
-
-    void spin(); // Main loop
+    void spin();
 
 private:
-    // Callbacks
     void fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
     void refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void motorCommandCallback(const std_msgs::String::ConstPtr& msg);
 
-    // Core Logic
-    void publishCalculatedData(bool is_stopping);
-    void processAndDraw(cv::Mat& frame);
+    void publishCalculatedData(const cv::Mat& final_frame, bool is_stopping);
+    void drawVisuals(cv::Mat& frame, bool draw_text_overlays);
     std::string getCurrentTimestamp();
     std::string controlModeToString();
     cv::Point2f parsePosition(const std::string& data);
 
-    // Member Variables
-    ros::NodeHandle nh_;
-    ros::NodeHandle pnh_;
+    // Filter instance
+    std::unique_ptr<AdaptiveFilter> m_filter_x;
 
     // ROS Communication
+    ros::NodeHandle nh_;
+    ros::NodeHandle pnh_;
     ros::Publisher experiment_data_pub_;
     ros::Subscriber fish_tracker_sub_;
-    ros::Subscriber refuge_tracker_sub_; // New subscriber for the refuge
+    ros::Subscriber refuge_state_sub_;
     ros::Subscriber state_sub_;
     ros::Subscriber motor_command_sub_;
 
@@ -83,48 +65,54 @@ private:
     ControlMode control_mode_;
     std::string experiment_id_;
     long frame_counter_;
-    rectrial::pub_data::ConstPtr last_fish_tracker_msg_; // Latest message from the fish tracker
+    rectrial::pub_data::ConstPtr last_fish_tracker_msg_;
     bool has_fish_data_ = false;
     bool has_refuge_data_ = false;
 
-    // Calculation Parameters
+    // Parameters
     double gain_;
     double fixed_frequency_;
-    cv::Point2f fish_pos_;      // Position received from the fish tracker
-    cv::Point2f refuge_pos_;    // Position received from the refuge tracker
-    cv::Point2f prev_pos_;      // The result from the previous step
-    cv::Point2f new_pos_;       // The newly calculated position to be published
+    cv::Point2f fish_pos_;
+    cv::Point2f refuge_pos_;
+    cv::Point2f prev_pos_;
+    cv::Point2f new_pos_;
+    int refuge_bbox_width_;
+    int refuge_bbox_height_;
 
-    // Display
     GLWindow* gl_window_ = nullptr;
 };
 
 ControllerNode::ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
-    : nh_(nh), 
-      pnh_(pnh), 
-      node_state_(NodeState::WAITING_FOR_DATA), // Start in a state waiting for initial data
-      control_mode_(ControlMode::FIXED_FREQ),
-      frame_counter_(0), 
-      gain_(0.5),
-      fixed_frequency_(0.2)
+    : nh_(nh), pnh_(pnh), node_state_(NodeState::WAITING_FOR_DATA), control_mode_(ControlMode::FIXED_FREQ),
+      frame_counter_(0), gain_(0.5), fixed_frequency_(0.2)
 {
-    // --- 1. Setup Publishers and Subscribers ---
+    pnh_.param<int>("refuge_bbox_width", refuge_bbox_width_, 50);
+    pnh_.param<int>("refuge_bbox_height", refuge_bbox_height_, 50);
+
+    double filter_fs = 30.0;
+    int filter_taps = 128;
+    std::vector<double> filter_freqs;
+    pnh_.param<double>("filter_fs", filter_fs, 30.0);
+    pnh_.param<int>("filter_taps", filter_taps, 128);
+    pnh_.getParam("filter_freqs", filter_freqs);
+
+    if (filter_freqs.empty()) {
+        ROS_WARN("No filter frequencies provided.");
+    } else {
+        ROS_INFO("Filter will suppress %zu frequencies.", filter_freqs.size());
+    }
+    
+    m_filter_x.reset(new AdaptiveFilter(filter_fs, filter_taps, filter_freqs));
+    ROS_INFO("Adaptive filter initialized.");
+
     experiment_data_pub_ = nh_.advertise<rectrial::pub_data>("imager", 10);
-    
-    // Subscribe to the fish tracker
     fish_tracker_sub_ = nh_.subscribe("/imager_processed", 5, &ControllerNode::fishTrackerCallback, this);
-    // Subscribe to the NEW refuge tracker
-    refuge_tracker_sub_ = nh_.subscribe("/refuge_state", 5, &ControllerNode::refugeStateCallback, this);
-    
+    refuge_state_sub_ = nh_.subscribe("/refuge_state", 5, &ControllerNode::refugeStateCallback, this);
     state_sub_ = nh_.subscribe("set_state", 10, &ControllerNode::stateCallback, this);
     motor_command_sub_ = nh_.subscribe("set_motor_freq", 10, &ControllerNode::motorCommandCallback, this);
 
-    // --- 2. Initialize Calculation Variables ---
     prev_pos_ = cv::Point2f(0.0f, 0.0f);
-
-    ROS_INFO("ControllerNode initialized. Waiting for data from fish and refuge trackers...");
-    
-    // --- 3. Initialize Display ---
+    refuge_pos_ = cv::Point2f(0.0f, 0.0f);
     gl_window_ = new GLWindow(0, 0);
     gl_window_->setTitle("Experiment Control Screen");
 }
@@ -233,47 +221,44 @@ void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg)
 }
 
 // Draws the current state and data onto the image for display.
-void ControllerNode::processAndDraw(cv::Mat& frame)
-{
-    std::stringstream ss;
-    cv::Scalar text_color = CV_RGB(200, 200, 200);
-    
-    // Draw refuge position if available
+void ControllerNode::drawVisuals(cv::Mat& frame, bool draw_text_overlays) {
+    // --- Part 1: Always draw the tracking boxes ---
     if(has_refuge_data_) {
-        cv::putText(frame, "Refuge: (" + std::to_string((int)refuge_pos_.x) + "," + std::to_string((int)refuge_pos_.y) + ")", 
-                    cv::Point(frame.cols - 250, 30), cv::FONT_HERSHEY_SIMPLEX, 0.6, CV_RGB(0, 255, 0), 2);
+        cv::Rect2d refuge_box(refuge_pos_.x - refuge_bbox_width_ / 2.0, refuge_pos_.y - refuge_bbox_height_ / 2.0, refuge_bbox_width_, refuge_bbox_height_);
+        cv::rectangle(frame, refuge_box, cv::Scalar(255, 255, 255), 2);
+        cv::Point refuge_center(refuge_box.x + refuge_box.width / 2, refuge_box.y + refuge_box.height / 2);
+        cv::circle(frame, refuge_center, 4, cv::Scalar(0, 0, 0), -1);
     }
-
-    switch (node_state_)
-    {
-        case NodeState::WAITING_FOR_DATA:
-            cv::putText(frame, "Waiting for tracker data...", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
-            break;
-        case NodeState::WAITING_FOR_START:
-            cv::putText(frame, "Press Space to Start Experiment", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
-            break;
-        case NodeState::EXPERIMENT_RUNNING:
-            ss << std::fixed << std::setprecision(2)
-               << "Mode: " << controlModeToString() << " | Gain: " << gain_ 
-               << " | Fish: (" << (int)fish_pos_.x << ", " << (int)fish_pos_.y << ")"
-               << " | New Pos: (" << (int)new_pos_.x << ", " << (int)new_pos_.y << ")";
-            cv::putText(frame, ss.str(), cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.6, CV_RGB(50, 255, 50), 2);
-            cv::putText(frame, "Frame: " + std::to_string(frame_counter_), cv::Point(25, 90), cv::FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2);
-            cv::putText(frame, "Press Space to STOP", cv::Point(25, 130), cv::FONT_HERSHEY_SIMPLEX, 0.7, CV_RGB(255, 100, 100), 2);
-            break;
-        case NodeState::EXPERIMENT_DONE:
-            cv::putText(frame, "Experiment Done. Press Space to Restart.", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.8, text_color, 2);
-            break;
-    }
-
-    if (gl_window_)
-    {
-        gl_window_->updateImage(frame.ptr(0), frame.cols, frame.rows, GL_RED);
+    
+    // --- Part 2: Conditionally draw the status text ---
+    if (draw_text_overlays) {
+        std::stringstream ss;
+        cv::Scalar text_color = CV_RGB(200, 200, 200);
+        
+        switch (node_state_) {
+            case NodeState::WAITING_FOR_DATA:
+                cv::putText(frame, "Waiting for fish tracker data...", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+                break;
+            case NodeState::WAITING_FOR_START:
+                cv::putText(frame, "Press Space to Start Experiment", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+                break;
+            case NodeState::EXPERIMENT_RUNNING:
+                ss << std::fixed << std::setprecision(2)
+                   << "Mode: " << controlModeToString() << " | Gain: " << gain_ 
+                   << " | Fish: (" << (int)fish_pos_.x << ", " << (int)fish_pos_.y << ")";
+                cv::putText(frame, ss.str(), cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.6, CV_RGB(50, 255, 50), 2);
+                cv::putText(frame, "Frame: " + std::to_string(frame_counter_), cv::Point(25, 90), cv::FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2);
+                cv::putText(frame, "Press Space to STOP", cv::Point(25, 130), cv::FONT_HERSHEY_SIMPLEX, 0.7, CV_RGB(255, 100, 100), 2);
+                break;
+            case NodeState::EXPERIMENT_DONE:
+                cv::putText(frame, "Experiment Done. Press Space to Restart.", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.8, text_color, 2);
+                break;
+        }
     }
 }
 
 // Performs the calculation and publishes the custom message.
-void ControllerNode::publishCalculatedData(bool is_stopping = false)
+void ControllerNode::publishCalculatedData(const cv::Mat& final_frame, bool is_stopping)
 {
     if (!last_fish_tracker_msg_) return;
 
@@ -284,7 +269,7 @@ void ControllerNode::publishCalculatedData(bool is_stopping = false)
     ss << new_pos_.x << "," << new_pos_.y;
     experiment_msg.data_e = ss.str();
 
-    experiment_msg.image_e = last_fish_tracker_msg_->image_e;
+    experiment_msg.image_e = *cv_bridge::CvImage(last_fish_tracker_msg_->image_e.header, "bgr8", final_frame).toImageMsg();
     
     if (frame_counter_ == 0 && !is_stopping) {
         experiment_msg.finish_c = "start";
@@ -335,7 +320,6 @@ void ControllerNode::spin()
     {
         ros::spinOnce();
 
-        // <<< FIX: The condition to start is now ONLY dependent on the fish tracker.
         if (node_state_ == NodeState::WAITING_FOR_DATA && has_fish_data_) {
             node_state_ = NodeState::WAITING_FOR_START;
             ROS_INFO("Fish tracker data received. Ready to start experiment.");
@@ -343,36 +327,47 @@ void ControllerNode::spin()
 
         if (last_fish_tracker_msg_) {
             try {
-                cv::Mat frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "mono8")->image.clone();
-                if (!frame.empty()) {
+                cv::Mat recording_frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
+                if (!recording_frame.empty()) {
                     
+                    // <<< FIX: Create a separate frame for the live display
+                    cv::Mat display_frame = recording_frame.clone();
+
                     if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
+                        double raw_fish_pos_x = fish_pos_.x;
+                        double filtered_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
+                        cv::Point2f filtered_fish_pos(filtered_fish_pos_x, fish_pos_.y);
                         
                         if (control_mode_ == ControlMode::CLOSED_LOOP_GAIN) {
-                            new_pos_ = (fish_pos_ * gain_) + prev_pos_;
+                            new_pos_ = (filtered_fish_pos * gain_) + prev_pos_;
                         } else {
                             new_pos_ = prev_pos_; 
                         }
                         
-                        publishCalculatedData(false);
+                        // 1. Draw visuals WITHOUT text for the recording
+                        drawVisuals(recording_frame, false); 
+                        // 2. Publish the clean frame for the video recorder
+                        publishCalculatedData(recording_frame, false);
                         
                         prev_pos_ = new_pos_;
                         frame_counter_++;
                     }
                     
-                    processAndDraw(frame);
+                    // 3. Draw visuals WITH text for the live display
+                    drawVisuals(display_frame, true);
+                    // 4. Update the GL window with the fully annotated frame
+                    if (gl_window_) {
+                        gl_window_->updateImage(display_frame.ptr(0), display_frame.cols, display_frame.rows, GL_BGR);
+                    }
                 }
             } catch (const cv_bridge::Exception& e) {
                 ROS_ERROR("cv_bridge exception: %s", e.what());
             }
-        } else if (node_state_ == NodeState::WAITING_FOR_DATA) {
-             ROS_WARN_THROTTLE(5.0, "Waiting for data from fish tracker on /imager_processed...");
-        }
-
+        }  
+        
         SDL_Event sdl_event;
-        while (SDL_PollEvent(&sdl_event))
-        {
-            if (sdl_event.type == SDL_KEYUP && sdl_event.key.keysym.scancode == SDL_SCANCODE_SPACE)
+        while (SDL_PollEvent(&sdl_event)) {
+             if (sdl_event.type == SDL_KEYUP && sdl_event.key.keysym.scancode == SDL_SCANCODE_SPACE)
             {
                 if (node_state_ == NodeState::WAITING_FOR_START) {
                     ROS_INFO("Spacebar pressed. Starting experiment.");
@@ -383,7 +378,9 @@ void ControllerNode::spin()
                     experiment_id_ = getCurrentTimestamp();
                 } else if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
                     ROS_INFO("Spacebar pressed. Stopping experiment.");
-                    publishCalculatedData(true);
+                    cv::Mat frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
+                    drawVisuals(frame, true);
+                    publishCalculatedData(frame, true);
                     node_state_ = NodeState::EXPERIMENT_DONE;
                 } else if (node_state_ == NodeState::EXPERIMENT_DONE) {
                     ROS_INFO("Spacebar pressed. Resetting for a new experiment.");

@@ -121,94 +121,66 @@ void OnlineTrackerNode::imageCallback(const rectrial::pub_data::ConstPtr& msg)
     }
 }
 
-void OnlineTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Header& header)
-{
-    // The switch statement makes the node's behavior clear and easy to manage.
-    switch (state_)
-    {
+void OnlineTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Header& header) {
+    switch (state_) {
         case NodeState::WAITING_FOR_FIRST_FRAME:
-            // This case only runs once on the very first frame received.
-            ROS_INFO("First frame received. Proceeding to object selection.");
             initializeTracker(frame);
             break;
 
         case NodeState::SELECTING_ROI:
-            // This state should not be active during a normal callback.
-            // It's handled entirely within the blocking initializeTracker function.
-            ROS_WARN("Still in selection state during callback, this should not happen.");
             break;
 
-        case NodeState::TRACKING:
-        {
-            // --- Update the tracker ---
+        case NodeState::TRACKING: {
             bool ok = tracker_->update(frame, tracking_bbox_);
 
-            // --- Draw visuals on the frame ---
-            cv::Mat display_frame = frame.clone();
-            if (ok)
-            {
-                // Draw the bounding box if tracking is successful.
-                cv::rectangle(display_frame, tracking_bbox_, cv::Scalar(255, 0, 0), 2);
-            }
-            else
-            {
-                // Display a warning if the tracker lost the object.
+            // Convert the grayscale frame to a color frame for drawing
+            cv::Mat display_frame;
+            cv::cvtColor(frame, display_frame, cv::COLOR_GRAY2BGR);
+
+            if (ok) {
+                // Draw a white box for the fish
+                cv::rectangle(display_frame, tracking_bbox_, cv::Scalar(255, 255, 255), 2);
+            } else {
                 cv::putText(display_frame, "Tracking Failure", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 0, 255), 2);
             }
             
-            // Calculate and draw the center point.
             cv::Point center(tracking_bbox_.x + tracking_bbox_.width / 2, tracking_bbox_.y + tracking_bbox_.height / 2);
-            cv::circle(display_frame, center, 4, cv::Scalar(0, 255, 0), -1);
+            // Draw a black dot in the center
+            cv::circle(display_frame, center, 4, cv::Scalar(0, 0, 0), -1);
 
-            // --- Publish the processed data ---
             rectrial::pub_data processed_msg;
-            processed_msg.image_e = *cv_bridge::CvImage(header, "mono8", display_frame).toImageMsg();
+            // Publish the image as "bgr8" (color)
+            processed_msg.image_e = *cv_bridge::CvImage(header, "bgr8", display_frame).toImageMsg();
             processed_msg.data_e = std::to_string(center.x) + "," + std::to_string(center.y);
             processed_pub_.publish(processed_msg);
 
-            // --- Display the result ---
+            // Display the result in this node's own window
             cv::imshow(TRACKING_WINDOW_NAME_, display_frame);
-            cv::waitKey(1); // Necessary for imshow to update the window.
+            cv::waitKey(1);
             break;
         }
     }
 }
 
-void OnlineTrackerNode::initializeTracker(const cv::Mat& frame)
-{
+void OnlineTrackerNode::initializeTracker(const cv::Mat& frame) {
     state_ = NodeState::SELECTING_ROI;
-
     cv::namedWindow(SELECTION_WINDOW_NAME_, cv::WINDOW_NORMAL | cv::WINDOW_GUI_EXPANDED);
     MouseParams mouse_params;
     cv::setMouseCallback(SELECTION_WINDOW_NAME_, onMouse, &mouse_params);
 
     ROS_INFO("Please select the fish to track by clicking on it.");
     
-    // This loop waits for the user to click. It blocks execution,
-    // but this is acceptable for a one-time setup step.
-    while (!mouse_params.clicked && ros::ok())
-    {
+    while (!mouse_params.clicked && ros::ok()) {
         cv::imshow(SELECTION_WINDOW_NAME_, frame);
-        // Allow ROS to process shutdown messages while waiting for user input.
-        if (cv::waitKey(10) == 27) // 27 = ESC key
-        {
-            ROS_INFO("Object selection cancelled by user. Shutting down.");
-            ros::shutdown();
-            return;
-        }
+        if (cv::waitKey(10) == 27) { ros::shutdown(); return; }
     }
     
-    // The user has clicked, now we initialize the tracker.
     tracking_bbox_ = cv::Rect2d(mouse_params.point.x - (BBOX_WIDTH_ / 2.0),
-                                mouse_params.point.y - (BBOX_HEIGHT_ / 2.0),
-                                BBOX_WIDTH_,
-                                BBOX_HEIGHT_);
-
-    // Using CSRT tracker as in the original code.
+                                  mouse_params.point.y - (BBOX_HEIGHT_ / 2.0),
+                                  BBOX_WIDTH_, BBOX_HEIGHT_);
     tracker_ = cv::TrackerCSRT::create();
     tracker_->init(frame, tracking_bbox_);
 
-    // Clean up the selection window and transition to the main tracking state.
     cv::destroyWindow(SELECTION_WINDOW_NAME_);
     ROS_INFO("Tracker initialized. Starting continuous tracking.");
     state_ = NodeState::TRACKING;
