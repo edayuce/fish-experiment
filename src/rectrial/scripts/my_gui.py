@@ -5,7 +5,7 @@ import gi
 import time
 import roslaunch
 import rospy
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gtk as gtk
@@ -28,6 +28,7 @@ class MyApp (object):
 
         self.pubMotorFreq = rospy.Publisher('set_motor_freq', String, queue_size=100)
         self.pubState = rospy.Publisher('set_state', String, queue_size=100)
+        self.pubFilterState = rospy.Publisher('set_filter_state', Bool, queue_size=10)
         rospy.init_node('interface', anonymous=True)
 
         self.username = os.environ.get('USER')
@@ -63,22 +64,11 @@ class MyApp (object):
         self.set_olg.connect("toggled",self.openloop_gain)
 
         try:
-            select_button = self.builder.get_object("filechoose")
-            select_button.connect("file-set",self.dic_set)
+            filter_check = self.builder.get_object("adaptive_filter")
+            filter_check.connect("toggled", self.toggle_filter)
         except Exception as e:
-            print("Could not find filechoose button: ", e)
+            print("Could not find adaptive-filter button: ", e)
 
-        try:
-            track_fish = self.builder.get_object("track_fish_button")
-            track_fish.connect("toggled",self.track_fish_func)
-        except Exception as e:
-            print("Could not find track_fish_button: ", e)
-
-        try:
-            track_object = self.builder.get_object("track_object_button")
-            track_object.connect("toggled",self.track_object_func)
-        except Exception as e:
-            print("Could not find track_object_button: ", e)
 
         try:
             start_cam = self.builder.get_object("start_cam")
@@ -114,18 +104,7 @@ class MyApp (object):
             kill_cam.connect("clicked",self.kill_cam)
         except Exception as e:
             print("Could not find kill_cam button: ", e)
-        
-        try:
-            start_but = self.builder.get_object("start_track")
-            start_but.connect("clicked",self.start_track)
-        except Exception as e:
-            print("Could not find start_track button: ", e)
 
-        try:
-            kill_but = self.builder.get_object("kill_track")
-            kill_but.connect("clicked",self.kill_track)
-        except Exception as e:
-            print("Could not find kill_track button: ", e)
 
         try:
             self.mode_config = self.builder.get_object("mode_config")
@@ -136,12 +115,6 @@ class MyApp (object):
                 self.mode_config.connect('changed', self.mode_set)
             except Exception as e:
                 print("Could not find mode_config/csv_selector combobox: ", e)
-
-        try:
-            left_radio_button = self.builder.get_object("left_radio_button")
-            left_radio_button.connect("toggled",self.set_fish_direction)
-        except Exception as e:
-            print("Could not find left_radio_button: ", e)
 
         self.path = None
         self.falseEventFlag = False
@@ -196,6 +169,18 @@ class MyApp (object):
             text = self.freq_config.get_text().strip()
             my_freq = text.replace(',', '.')
             self.pubMotorFreq.publish(my_freq)
+
+
+    def toggle_filter(self, button):
+        """
+        Publishes the state of the filter checkbox to the controller node.
+        """
+        is_active = button.get_active()
+        self.pubFilterState.publish(is_active)
+        if is_active:
+            rospy.loginfo("Adaptive filter ENABLED")
+        else:
+            rospy.loginfo("Adaptive filter DISABLED")
 
 
 

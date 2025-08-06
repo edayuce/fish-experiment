@@ -246,7 +246,7 @@
             <property name="value">1</property>
           </object>
           <packing>
-            <property name="x">180</property>
+            <property name="x">170</property>
             <property name="y">220</property>
           </packing>
         </child>
@@ -259,7 +259,7 @@
             <property name="label" translatable="yes">Reafferent Gain:</property>
           </object>
           <packing>
-            <property name="x">20</property>
+            <property name="x">10</property>
             <property name="y">220</property>
           </packing>
         </child>
@@ -274,7 +274,7 @@
             <property name="draw-indicator">True</property>
           </object>
           <packing>
-            <property name="x">130</property>
+            <property name="x">120</property>
             <property name="y">220</property>
           </packing>
         </child>
@@ -290,12 +290,12 @@
           </object>
           <packing>
             <property name="x">10</property>
-            <property name="y">260</property>
+            <property name="y">275</property>
           </packing>
         </child>
         <child>
           <object class="GtkCheckButton" id="openloop_gain">
-            <property name="label" translatable="yes">openloop_gain</property>
+            <property name="label" translatable="yes">open-loop gain</property>
             <property name="width-request">100</property>
             <property name="height-request">20</property>
             <property name="visible">True</property>
@@ -320,7 +320,22 @@
           </object>
           <packing>
             <property name="x">10</property>
-            <property name="y">290</property>
+            <property name="y">300</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="adaptive_filter">
+            <property name="label" translatable="yes">adaptive-filter</property>
+            <property name="width-request">100</property>
+            <property name="height-request">20</property>
+            <property name="visible">True</property>
+            <property name="can-focus">True</property>
+            <property name="receives-default">False</property>
+            <property name="draw-indicator">True</property>
+          </object>
+          <packing>
+            <property name="x">175</property>
+            <property name="y">300</property>
           </packing>
         </child>
       </object>

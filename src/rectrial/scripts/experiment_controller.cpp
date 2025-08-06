@@ -2,6 +2,7 @@
 
 #include <ros/ros.h>
 #include <std_msgs/String.h>
+#include <std_msgs/Bool.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 #include <sensor_msgs/image_encodings.h>
@@ -41,6 +42,7 @@ private:
     void refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void motorCommandCallback(const std_msgs::String::ConstPtr& msg);
+    void filterStateCallback(const std_msgs::Bool::ConstPtr& msg);
 
     void publishCalculatedData(const cv::Mat& final_frame, bool is_stopping);
     void drawVisuals(cv::Mat& frame, bool draw_text_overlays);
@@ -68,6 +70,7 @@ private:
     rectrial::pub_data::ConstPtr last_fish_tracker_msg_;
     bool has_fish_data_ = false;
     bool has_refuge_data_ = false;
+    bool m_is_filter_enabled = false;
 
     // Parameters
     double gain_;
@@ -126,6 +129,17 @@ ControllerNode::~ControllerNode()
     }
 }
 
+void ControllerNode::filterStateCallback(const std_msgs::Bool::ConstPtr& msg)
+{
+    m_is_filter_enabled = msg->data;
+    if (m_is_filter_enabled) {
+        ROS_INFO("Adaptive filter has been ENABLED.");
+    } else {
+        ROS_INFO("Adaptive filter has been DISABLED.");
+    }
+}
+
+
 // Helper function to parse "x,y" string into a Point2f
 cv::Point2f ControllerNode::parsePosition(const std::string& data) {
     cv::Point2f pos(0,0);
@@ -148,12 +162,14 @@ cv::Point2f ControllerNode::parsePosition(const std::string& data) {
 // Callback for data from the OnlineTrackerNode (fish)
 void ControllerNode::fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg)
 {
+
     last_fish_tracker_msg_ = msg;
     fish_pos_ = parsePosition(msg->data_e);
     if (!has_fish_data_) {
         has_fish_data_ = true;
         ROS_INFO("Received first data packet from fish tracker.");
     }
+
 }
 
 // NEW Callback for data from the RefugeTrackerNode
@@ -330,32 +346,38 @@ void ControllerNode::spin()
                 cv::Mat recording_frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
                 if (!recording_frame.empty()) {
                     
-                    // <<< FIX: Create a separate frame for the live display
                     cv::Mat display_frame = recording_frame.clone();
 
                     if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
+                        
                         double raw_fish_pos_x = fish_pos_.x;
-                        double filtered_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
-                        cv::Point2f filtered_fish_pos(filtered_fish_pos_x, fish_pos_.y);
+                        double processed_fish_pos_x = raw_fish_pos_x;
+
+                        if (m_is_filter_enabled) {
+                            if (control_mode_ == ControlMode::SUM_OF_SINES) {
+                                processed_fish_pos_x = 0.0;
+                                ROS_INFO_THROTTLE(1.0, "Filter enabled with Sum of Sines: Fish position input set to 0.");
+                            } else {
+                                processed_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
+                            }
+                        }
+                        
+                        cv::Point2f processed_fish_pos(processed_fish_pos_x, fish_pos_.y);
                         
                         if (control_mode_ == ControlMode::CLOSED_LOOP_GAIN) {
-                            new_pos_ = (filtered_fish_pos * gain_) + prev_pos_;
+                            new_pos_ = (processed_fish_pos * gain_) + prev_pos_;
                         } else {
                             new_pos_ = prev_pos_; 
                         }
                         
-                        // 1. Draw visuals WITHOUT text for the recording
                         drawVisuals(recording_frame, false); 
-                        // 2. Publish the clean frame for the video recorder
                         publishCalculatedData(recording_frame, false);
                         
                         prev_pos_ = new_pos_;
                         frame_counter_++;
                     }
                     
-                    // 3. Draw visuals WITH text for the live display
                     drawVisuals(display_frame, true);
-                    // 4. Update the GL window with the fully annotated frame
                     if (gl_window_) {
                         gl_window_->updateImage(display_frame.ptr(0), display_frame.cols, display_frame.rows, GL_BGR);
                     }
@@ -363,34 +385,26 @@ void ControllerNode::spin()
             } catch (const cv_bridge::Exception& e) {
                 ROS_ERROR("cv_bridge exception: %s", e.what());
             }
-        }  
+        } 
         
         SDL_Event sdl_event;
         while (SDL_PollEvent(&sdl_event)) {
-             if (sdl_event.type == SDL_KEYUP && sdl_event.key.keysym.scancode == SDL_SCANCODE_SPACE)
-            {
+             if (sdl_event.type == SDL_KEYUP && sdl_event.key.keysym.scancode == SDL_SCANCODE_SPACE) {
                 if (node_state_ == NodeState::WAITING_FOR_START) {
-                    ROS_INFO("Spacebar pressed. Starting experiment.");
                     node_state_ = NodeState::EXPERIMENT_RUNNING;
                     frame_counter_ = 0;
                     prev_pos_ = cv::Point2f(0.0f, 0.0f);
                     new_pos_ = cv::Point2f(0.0f, 0.0f);
                     experiment_id_ = getCurrentTimestamp();
                 } else if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
-                    ROS_INFO("Spacebar pressed. Stopping experiment.");
                     cv::Mat frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
-                    drawVisuals(frame, true);
+                    drawVisuals(frame, false); // Draw clean visuals for the final frame
                     publishCalculatedData(frame, true);
                     node_state_ = NodeState::EXPERIMENT_DONE;
                 } else if (node_state_ == NodeState::EXPERIMENT_DONE) {
-                    ROS_INFO("Spacebar pressed. Resetting for a new experiment.");
                     node_state_ = NodeState::WAITING_FOR_START;
                 }
-            }
-            else if (gl_window_ && sdl_event.type == SDL_WINDOWEVENT && SDL_GetWindowFromID(sdl_event.window.windowID) == gl_window_->window)
-            {
-                gl_window_->processEvent(sdl_event);
-            }
+             }
         }
         
         rate.sleep();
