@@ -67,3 +67,48 @@ double AdaptiveFilter::measurement(double xNew)
 
     return y_complex.real();
 }
+
+void AdaptiveFilter::primeBuffer(double value)
+{
+    // This function fills the entire internal buffer with a single, constant value.
+    // This "warms up" the filter so its output is immediately stable and meaningful.
+    for (int i = 0; i < m_N; ++i) {
+        m_xBuffer[i] = value;
+    }
+}
+
+void AdaptiveFilter::updateFrequencies(const std::vector<double>& new_freqs)
+{
+    // Store the new frequencies
+    m_freqs = new_freqs;
+
+    // This logic is identical to the constructor. We are recalculating the
+    // filter's properties based on the new frequency list.
+
+    const std::complex<double> i(0.0, 1.0);
+
+    // 1. Start with the base low-pass filter prototype
+    for (int n = 0; n < m_N; ++n) {
+        if (n == 0) {
+            m_weights[n] = m_N;
+        } else {
+            std::complex<double> numerator = 1.0 - exp(-i * 2.0 * M_PI * static_cast<double>(n));
+            std::complex<double> denominator = 1.0 - exp(-i * 2.0 * M_PI * (static_cast<double>(n) / m_N));
+            m_weights[n] = numerator / denominator;
+        }
+    }
+
+    // 2. Create the new notches by subtracting sinusoids for each new frequency
+    for (double freq_to_suppress : m_freqs) {
+        double k = freq_to_suppress / (m_Fs / m_N);
+        for (int n = 0; n < m_N; ++n) {
+            m_weights[n] -= exp(-i * 2.0 * M_PI * k * (static_cast<double>(n) / m_N));
+            m_weights[n] -= exp(-i * 2.0 * M_PI * (static_cast<double>(m_N) - k) * (static_cast<double>(n) / m_N));
+        }
+    }
+
+    // 3. Normalize the final weights
+    for (int n = 0; n < m_N; ++n) {
+        m_weights[n] /= m_N;
+    }
+}

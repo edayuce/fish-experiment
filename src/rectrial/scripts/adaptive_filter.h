@@ -23,6 +23,10 @@ public:
      * @return The filtered output sample.
      */
     double measurement(double xNew);
+    
+    void primeBuffer(double value);
+    
+    void updateFrequencies(const std::vector<double>& new_freqs);
 
 private:
     // Filter parameters

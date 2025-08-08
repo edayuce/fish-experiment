@@ -60,8 +60,6 @@ class MyApp (object):
         self.set_closedloop = self.builder.get_object("closed_loop")
         self.set_closedloop.connect("toggled",self.closedloop)
 
-        self.set_olg = self.builder.get_object("openloop_gain")
-        self.set_olg.connect("toggled",self.openloop_gain)
 
         try:
             filter_check = self.builder.get_object("adaptive_filter")
@@ -151,7 +149,7 @@ class MyApp (object):
             text = self.gain_config.get_text().strip()
             my_gain = text.replace(',', '.')
             self.pubMotorFreq.publish("gain:"+my_gain)
-            print("gain:"+my_gain)
+            #print("gain:"+my_gain)
 
     
     def openloop(self,button):
@@ -165,6 +163,10 @@ class MyApp (object):
     def closedloop(self,button):
         if button.get_active():
             self.pubMotorFreq.publish("closedloop")
+            text = self.gain_config.get_text().strip()
+            my_gain = text.replace(',', '.')
+            self.pubMotorFreq.publish("gain:"+my_gain)
+            
         else:
             text = self.freq_config.get_text().strip()
             my_freq = text.replace(',', '.')
@@ -182,14 +184,6 @@ class MyApp (object):
         else:
             rospy.loginfo("Adaptive filter DISABLED")
 
-
-
-    def openloop_gain(self,button):
-         if (button.get_active()):
-             text = self.gain_config.get_text().strip()
-             my_gain = text.replace(',', '.')
-             self.pubMotorFreq.publish("ol_gain:"+my_gain)
-             print("gain:"+my_gain)
 
     def track_fish_func(self, widget):
         self.fish_obj= "fish"

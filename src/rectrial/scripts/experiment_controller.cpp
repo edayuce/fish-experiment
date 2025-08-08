@@ -10,9 +10,10 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <geometry_msgs/PointStamped.h>
 
-#include <memory> // Required for std::unique_ptr
+#include <memory>
+#include <fstream> // For CSV file reading
 
-#include "adaptive_filter.h" // <<< Include the filter header
+#include "adaptive_filter.h"
 #include "rectrial/pub_data.h"
 #include "GLWindow.h"
 
@@ -28,7 +29,7 @@ namespace ExperimentController
 {
 
 enum class NodeState { WAITING_FOR_DATA, WAITING_FOR_START, EXPERIMENT_RUNNING, EXPERIMENT_DONE };
-enum class ControlMode { INACTIVE, CLOSED_LOOP_GAIN, OPEN_LOOP_GAIN, FIXED_FREQ, SUM_OF_SINES };
+enum class ControlMode { CLOSED_LOOP_GAIN, OPEN_LOOP, SUM_OF_SINES, FIXED_FREQ, INACTIVE };
 
 class ControllerNode
 {
@@ -38,22 +39,24 @@ public:
     void spin();
 
 private:
+    // Callbacks
     void fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
     void refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void motorCommandCallback(const std_msgs::String::ConstPtr& msg);
     void filterStateCallback(const std_msgs::Bool::ConstPtr& msg);
 
-    void publishCalculatedData(const cv::Mat& final_frame, bool is_stopping);
+    // Core Logic
+    void publishCalculatedData(const cv::Mat& final_frame, bool is_stopping, double raw_pos, double filtered_pos);
     void drawVisuals(cv::Mat& frame, bool draw_text_overlays);
     std::string getCurrentTimestamp();
     std::string controlModeToString();
     cv::Point2f parsePosition(const std::string& data);
+    bool loadCsvFile(const std::string& path);
+    double calculateSumOfSines(double time_ms);
 
-    // Filter instance
+    // Member Variables
     std::unique_ptr<AdaptiveFilter> m_filter_x;
-
-    // ROS Communication
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
     ros::Publisher experiment_data_pub_;
@@ -61,8 +64,8 @@ private:
     ros::Subscriber refuge_state_sub_;
     ros::Subscriber state_sub_;
     ros::Subscriber motor_command_sub_;
+    ros::Subscriber filter_state_sub_;
 
-    // State Management
     NodeState node_state_;
     ControlMode control_mode_;
     std::string experiment_id_;
@@ -81,6 +84,16 @@ private:
     cv::Point2f new_pos_;
     int refuge_bbox_width_;
     int refuge_bbox_height_;
+    double m_count_per_mm;
+
+    // CSV Open Loop
+    std::string csv_file_path_;
+    std::vector<double> csv_positions_;
+    int csv_index_ = 0;
+
+    // Sine Wave Calculation
+    double a_pos_ = 0.0; // Amplitude in motor counts
+    std::chrono::steady_clock::time_point trial_start_time_;
 
     GLWindow* gl_window_ = nullptr;
 };
@@ -92,27 +105,37 @@ ControllerNode::ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     pnh_.param<int>("refuge_bbox_width", refuge_bbox_width_, 50);
     pnh_.param<int>("refuge_bbox_height", refuge_bbox_height_, 50);
 
+    // --- Filter Setup ---
     double filter_fs = 30.0;
     int filter_taps = 128;
     std::vector<double> filter_freqs;
     pnh_.param<double>("filter_fs", filter_fs, 30.0);
     pnh_.param<int>("filter_taps", filter_taps, 128);
     pnh_.getParam("filter_freqs", filter_freqs);
-
-    if (filter_freqs.empty()) {
-        ROS_WARN("No filter frequencies provided.");
-    } else {
-        ROS_INFO("Filter will suppress %zu frequencies.", filter_freqs.size());
-    }
-    
     m_filter_x.reset(new AdaptiveFilter(filter_fs, filter_taps, filter_freqs));
-    ROS_INFO("Adaptive filter initialized.");
+    
+    // --- CSV Open Loop Setup ---
+    pnh_.param<std::string>("csv_file_path", csv_file_path_, "");
+    if (!csv_file_path_.empty()) {
+        loadCsvFile(csv_file_path_);
+    }
 
+    
+    // --- Sine Wave Constants Setup ---
+    double amp_mm = 10.0;
+    pnh_.param<double>("amplitude_mm", amp_mm, 10.0);
+    double mm_per_rev = 10.0, encoder_count = 512.0, gear_ratio = (624.0 / 35.0) * 4.0;
+    double count_per_rev = encoder_count * gear_ratio;
+    m_count_per_mm = count_per_rev / mm_per_rev; // Store the conversion factor
+    a_pos_ = m_count_per_mm * amp_mm;            // Use it to calculate a_pos_
+
+    // --- ROS Communication ---
     experiment_data_pub_ = nh_.advertise<rectrial::pub_data>("imager", 10);
     fish_tracker_sub_ = nh_.subscribe("/imager_processed", 5, &ControllerNode::fishTrackerCallback, this);
     refuge_state_sub_ = nh_.subscribe("/refuge_state", 5, &ControllerNode::refugeStateCallback, this);
     state_sub_ = nh_.subscribe("set_state", 10, &ControllerNode::stateCallback, this);
     motor_command_sub_ = nh_.subscribe("set_motor_freq", 10, &ControllerNode::motorCommandCallback, this);
+    filter_state_sub_ = nh_.subscribe("/set_filter_state", 1, &ControllerNode::filterStateCallback, this);
 
     prev_pos_ = cv::Point2f(0.0f, 0.0f);
     refuge_pos_ = cv::Point2f(0.0f, 0.0f);
@@ -127,6 +150,22 @@ ControllerNode::~ControllerNode()
         delete gl_window_;
         gl_window_ = nullptr;
     }
+}
+
+bool ControllerNode::loadCsvFile(const std::string& path) {
+    csv_positions_.clear();
+    csv_index_ = 0;
+    std::ifstream file(path);
+    if (!file.is_open()) { ROS_ERROR("Failed to open CSV file: %s", path.c_str()); return false; }
+    std::string line;
+    while (std::getline(file, line)) {
+        try { csv_positions_.push_back(std::stod(line)); }
+        catch (const std::exception& e) { ROS_WARN("Could not parse line in CSV: '%s'", line.c_str()); }
+    }
+    file.close();
+    if (csv_positions_.empty()) { ROS_ERROR("CSV file is empty or invalid: %s", path.c_str()); return false; }
+    ROS_INFO("Successfully loaded %zu positions from %s", csv_positions_.size(), path.c_str());
+    return true;
 }
 
 void ControllerNode::filterStateCallback(const std_msgs::Bool::ConstPtr& msg)
@@ -194,46 +233,54 @@ void ControllerNode::refugeStateCallback(const geometry_msgs::PointStamped::Cons
     }
 }
 
-void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg)
-{
-    const std::string& cmd = msg->data;
-    ROS_INFO_STREAM("Received command from GUI: " << cmd);
+void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg) {
+    
+    std::string cmd = msg->data;
+    std::vector<double> freqs_to_set; // Create a list for the new frequencies
 
-    if (cmd.rfind("gain:", 0) == 0) {
-        try {
-            std::string val_str = cmd.substr(5);
-            gain_ = std::stod(val_str);
-            control_mode_ = ControlMode::CLOSED_LOOP_GAIN;
-            ROS_INFO("Set mode to CLOSED_LOOP_GAIN with gain = %f", gain_);
-        } catch (const std::exception& e) { ROS_ERROR("Failed to parse gain: %s", cmd.c_str()); }
-    } 
-    else if (cmd.rfind("ol_gain:", 0) == 0) {
-        try {
-            std::string val_str = cmd.substr(8);
-            gain_ = std::stod(val_str);
-            control_mode_ = ControlMode::OPEN_LOOP_GAIN;
-            ROS_INFO("Set mode to OPEN_LOOP_GAIN with gain = %f", gain_);
-        } catch (const std::exception& e) { ROS_ERROR("Failed to parse gain: %s", cmd.c_str()); }
-    }
-    else if (cmd == "closedloop") {
-        control_mode_ = ControlMode::CLOSED_LOOP_GAIN;
-        ROS_INFO("Set mode to CLOSED_LOOP_GAIN (gain: %f)", gain_);
-    }
-    else if (cmd == "openloop") {
-        control_mode_ = ControlMode::OPEN_LOOP_GAIN;
-        ROS_INFO("Set mode to OPEN_LOOP_GAIN (gain: %f)", gain_);
-    }
-    else if (cmd == "sum") {
+    if (cmd == "sum") {
+        
         control_mode_ = ControlMode::SUM_OF_SINES;
         ROS_INFO("Set mode to SUM_OF_SINES");
-    }
-    else { 
+        
+        static const double sum_freqs[13] = {0.1, 0.15, 0.25, 0.35, 0.55, 0.65, 0.85, 0.95, 1.15, 1.45, 1.55, 1.85, 2.05};
+        freqs_to_set.assign(sum_freqs, sum_freqs + 13);
+        ROS_INFO("Filter updated to suppress all 13 Sum-of-Sines frequencies.");
+        
+    
+    } else if (cmd == "openloop") {
+        
+        control_mode_ = ControlMode::OPEN_LOOP;
+        ROS_INFO("Set mode to OPEN_LOOP");
+
+        pnh_.getParam("csv_file_path", csv_file_path_);
+        if (!csv_file_path_.empty()) loadCsvFile(csv_file_path_);
+
+    
+    } else if (cmd == "closedloop" || cmd.rfind("gain:", 0) == 0) {
+        control_mode_ = ControlMode::CLOSED_LOOP_GAIN;
+
         try {
-            fixed_frequency_ = std::stod(cmd);
+            // This line correctly parses the gain value from the string
+            gain_ = std::stod(cmd.substr(5));
+            ROS_INFO("Gain set to: %.2f", gain_);
+        } catch (const std::exception& e) {
+            ROS_ERROR("Failed to parse gain value from command: %s", cmd.c_str());
+        }
+    
+    } else {
+        try {            
             control_mode_ = ControlMode::FIXED_FREQ;
-            ROS_INFO("Set mode to FIXED_FREQ with freq = %f", fixed_frequency_);
-        } catch (const std::exception& e) { ROS_WARN("Unknown command/frequency: %s", cmd.c_str()); }
+            fixed_frequency_ = std::stod(cmd);
+
+            freqs_to_set.push_back(fixed_frequency_);
+            ROS_INFO("Filter updated to suppress single frequency: %.2f Hz", fixed_frequency_);
+
+        } catch (const std::exception& e) {
+            ROS_WARN("Could not parse '%s' as a command or frequency.", cmd.c_str());
+        }
     }
+    ROS_INFO("Switched to mode: %s", controlModeToString().c_str());
 }
 
 // Draws the current state and data onto the image for display.
@@ -274,7 +321,7 @@ void ControllerNode::drawVisuals(cv::Mat& frame, bool draw_text_overlays) {
 }
 
 // Performs the calculation and publishes the custom message.
-void ControllerNode::publishCalculatedData(const cv::Mat& final_frame, bool is_stopping)
+void ControllerNode::publishCalculatedData(const cv::Mat& final_frame, bool is_stopping, double raw_pos, double filtered_pos)
 {
     if (!last_fish_tracker_msg_) return;
 
@@ -282,7 +329,8 @@ void ControllerNode::publishCalculatedData(const cv::Mat& final_frame, bool is_s
     experiment_msg.video_name_p = experiment_id_;
     
     std::stringstream ss;
-    ss << new_pos_.x << "," << new_pos_.y;
+    // <<< FIX: Create the new data format: "final_x,final_y;raw_fish_x;filtered_fish_x"
+    ss << new_pos_.x << "," << new_pos_.y << ";" << raw_pos << ";" << filtered_pos;
     experiment_msg.data_e = ss.str();
 
     experiment_msg.image_e = *cv_bridge::CvImage(last_fish_tracker_msg_->image_e.header, "bgr8", final_frame).toImageMsg();
@@ -321,7 +369,7 @@ std::string ControllerNode::controlModeToString()
     switch(control_mode_) {
         case ControlMode::INACTIVE:         return "Inactive";
         case ControlMode::CLOSED_LOOP_GAIN: return "ClosedLoop";
-        case ControlMode::OPEN_LOOP_GAIN:   return "OpenLoop";
+        case ControlMode::OPEN_LOOP:        return "OpenLoop";
         case ControlMode::FIXED_FREQ:       return "FixedFreq";
         case ControlMode::SUM_OF_SINES:     return "SumOfSines";
         default:                            return "Unknown";
@@ -331,60 +379,73 @@ std::string ControllerNode::controlModeToString()
 void ControllerNode::spin()
 {
     ros::Rate rate(30);
-
     while (ros::ok())
     {
         ros::spinOnce();
-
         if (node_state_ == NodeState::WAITING_FOR_DATA && has_fish_data_) {
             node_state_ = NodeState::WAITING_FOR_START;
-            ROS_INFO("Fish tracker data received. Ready to start experiment.");
         }
 
         if (last_fish_tracker_msg_) {
             try {
                 cv::Mat recording_frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
                 if (!recording_frame.empty()) {
-                    
                     cv::Mat display_frame = recording_frame.clone();
-
                     if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
                         
+                        // --- Centralized Calculation Logic ---
                         double raw_fish_pos_x = fish_pos_.x;
-                        double processed_fish_pos_x = raw_fish_pos_x;
+                        double filtered_fish_pos_x = raw_fish_pos_x; // Default to raw if filter is off
 
                         if (m_is_filter_enabled) {
                             if (control_mode_ == ControlMode::SUM_OF_SINES) {
-                                processed_fish_pos_x = 0.0;
-                                ROS_INFO_THROTTLE(1.0, "Filter enabled with Sum of Sines: Fish position input set to 0.");
+                                filtered_fish_pos_x = 0.0;
                             } else {
-                                processed_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
+                                filtered_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
                             }
                         }
                         
-                        cv::Point2f processed_fish_pos(processed_fish_pos_x, fish_pos_.y);
-                        
-                        if (control_mode_ == ControlMode::CLOSED_LOOP_GAIN) {
-                            new_pos_ = (processed_fish_pos * gain_) + prev_pos_;
-                        } else {
-                            new_pos_ = prev_pos_; 
+                        cv::Point2f processed_fish_pos(filtered_fish_pos_x, fish_pos_.y);
+
+                        switch (control_mode_) {
+                            case ControlMode::OPEN_LOOP:
+                                if (!csv_positions_.empty()) {
+                                    double position_mm = csv_positions_[csv_index_];
+                                    //Convert from mm to motor counts
+                                    new_pos_.x = position_mm * m_count_per_mm;
+                                    csv_index_ = (csv_index_ + 1) % csv_positions_.size();
+                                } else { new_pos_ = cv::Point2f(0,0); }
+                                break;
+                            
+                            case ControlMode::CLOSED_LOOP_GAIN:
+                                new_pos_ = (processed_fish_pos * gain_) + prev_pos_;
+                                break;
+
+                            case ControlMode::SUM_OF_SINES: {
+                                double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
+                                new_pos_.x = calculateSumOfSines(time_ms);
+                                new_pos_.y = 0;
+                                break;
+                            }
+                            case ControlMode::FIXED_FREQ: {
+                                double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
+                                new_pos_.x = (a_pos_ / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
+                                new_pos_.y = 0;
+                                break;
+                            }
                         }
                         
                         drawVisuals(recording_frame, false); 
-                        publishCalculatedData(recording_frame, false);
-                        
+                        publishCalculatedData(recording_frame, false, raw_fish_pos_x, filtered_fish_pos_x);
                         prev_pos_ = new_pos_;
                         frame_counter_++;
                     }
-                    
                     drawVisuals(display_frame, true);
                     if (gl_window_) {
                         gl_window_->updateImage(display_frame.ptr(0), display_frame.cols, display_frame.rows, GL_BGR);
                     }
                 }
-            } catch (const cv_bridge::Exception& e) {
-                ROS_ERROR("cv_bridge exception: %s", e.what());
-            }
+            } catch (const cv_bridge::Exception& e) { ROS_ERROR("cv_bridge exception: %s", e.what()); }
         } 
         
         SDL_Event sdl_event;
@@ -393,22 +454,40 @@ void ControllerNode::spin()
                 if (node_state_ == NodeState::WAITING_FOR_START) {
                     node_state_ = NodeState::EXPERIMENT_RUNNING;
                     frame_counter_ = 0;
+                    csv_index_ = 0;
                     prev_pos_ = cv::Point2f(0.0f, 0.0f);
                     new_pos_ = cv::Point2f(0.0f, 0.0f);
                     experiment_id_ = getCurrentTimestamp();
+                    trial_start_time_ = std::chrono::steady_clock::now();
+
+                    if (m_filter_x) {
+                        m_filter_x->primeBuffer(fish_pos_.x);
+                        ROS_INFO("Adaptive filter buffer primed with initial fish position.");
+                    }
+
                 } else if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
                     cv::Mat frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
-                    drawVisuals(frame, false); // Draw clean visuals for the final frame
-                    publishCalculatedData(frame, true);
+                    drawVisuals(frame, false);
+                    publishCalculatedData(frame, true, 0, 0);
                     node_state_ = NodeState::EXPERIMENT_DONE;
                 } else if (node_state_ == NodeState::EXPERIMENT_DONE) {
                     node_state_ = NodeState::WAITING_FOR_START;
                 }
              }
         }
-        
         rate.sleep();
     }
+}
+
+double ControllerNode::calculateSumOfSines(double time_ms) {
+    static const int NUM_SINE_FREQUENCIES = 13;
+    static const double freqs[NUM_SINE_FREQUENCIES] = {0.1, 0.15, 0.25, 0.35, 0.55, 0.65, 0.85, 0.95, 1.15, 1.45, 1.55, 1.85, 2.05};
+    static const double velPH[NUM_SINE_FREQUENCIES] = {0.2162, 2.5980, 0.0991, 0.2986, 2.9446, 2.5794, 2.8213, 0.0693, 1.4556, 0.3746, 1.0430, 2.9469, 2.6706};
+    double position = 0.0;
+    for (int i = 0; i < NUM_SINE_FREQUENCIES; ++i) {
+        position += (a_pos_ / (2.0 * M_PI * freqs[i])) * sin(2.0 * M_PI * freqs[i] * time_ms / 1000.0 + velPH[i] + (M_PI / 2.0));
+    }
+    return position;
 }
 
 } // namespace ExperimentController

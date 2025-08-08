@@ -289,23 +289,8 @@
             <property name="draw-indicator">True</property>
           </object>
           <packing>
-            <property name="x">10</property>
-            <property name="y">275</property>
-          </packing>
-        </child>
-        <child>
-          <object class="GtkCheckButton" id="openloop_gain">
-            <property name="label" translatable="yes">open-loop gain</property>
-            <property name="width-request">100</property>
-            <property name="height-request">20</property>
-            <property name="visible">True</property>
-            <property name="can-focus">True</property>
-            <property name="receives-default">False</property>
-            <property name="draw-indicator">True</property>
-          </object>
-          <packing>
-            <property name="x">175</property>
-            <property name="y">277</property>
+            <property name="x">20</property>
+            <property name="y">270</property>
           </packing>
         </child>
         <child>
@@ -316,11 +301,12 @@
             <property name="visible">True</property>
             <property name="can-focus">True</property>
             <property name="receives-default">False</property>
+            <property name="image-position">right</property>
             <property name="draw-indicator">True</property>
           </object>
           <packing>
-            <property name="x">10</property>
-            <property name="y">300</property>
+            <property name="x">175</property>
+            <property name="y">270</property>
           </packing>
         </child>
         <child>
@@ -334,7 +320,7 @@
             <property name="draw-indicator">True</property>
           </object>
           <packing>
-            <property name="x">175</property>
+            <property name="x">95</property>
             <property name="y">300</property>
           </packing>
         </child>

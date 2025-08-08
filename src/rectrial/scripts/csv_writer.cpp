@@ -1,4 +1,4 @@
-// data_logger_node.cpp
+// updated data_logger_node.cpp
 
 #include <ros/ros.h>
 #include <ros/package.h>
@@ -10,6 +10,7 @@
 #include <string>
 #include <iomanip>
 #include <algorithm>
+#include <sstream>
 
 namespace DataLogger
 {
@@ -54,11 +55,12 @@ DataLoggerNode::DataLoggerNode(ros::NodeHandle& nh) : nh_(nh)
     log_file_.open(log_file_path_);
     if (!log_file_.is_open()) { ROS_ERROR("Failed to open log file: %s", log_file_path_.c_str()); ros::shutdown(); return; }
     
-    log_file_ << "timestamp,fish_pos_x,fish_pos_y,refuge_pos_x,refuge_pos_y,loop_time_ms\n";
+    // <<< FIX: Add the new columns to the CSV header
+    log_file_ << "timestamp,final_pos_x,final_pos_y,raw_fish_pos_x,filtered_fish_pos_x,refuge_pos_x,refuge_pos_y,loop_time_ms\n";
     ROS_INFO("Logging data to: %s", log_file_path_.c_str());
 
     // Initialize two separate, standard ROS subscribers
-    fish_sub_ = nh_.subscribe("/imager_processed", 10, &DataLoggerNode::fishCallback, this);
+    fish_sub_ = nh_.subscribe("/imager", 10, &DataLoggerNode::fishCallback, this); // Listen to the final controller output
     refuge_sub_ = nh_.subscribe("/refuge_state", 10, &DataLoggerNode::refugeCallback, this);
     state_sub_ = nh_.subscribe("/set_state", 10, &DataLoggerNode::stateCallback, this);
     
@@ -81,17 +83,14 @@ void DataLoggerNode::refugeCallback(const geometry_msgs::PointStamped::ConstPtr&
     tryLogData(); // Attempt to log after receiving refuge data
 }
 
-// This is the core of the new logic. It only runs when we have a fresh pair of messages.
 void DataLoggerNode::tryLogData()
 {
-    // Check if we have received a new message from both subscribers
     if (!has_new_fish_data_ || !has_new_refuge_data_) {
-        return; // If not, wait for the other message to arrive
+        return;
     }
 
     ROS_INFO_ONCE("First data pair received. Logging started.");
 
-    // --- Calculate Loop Time ---
     ros::Time current_time = ros::Time::now();
     double loop_duration_ms = 0.0;
     if (!first_message_) {
@@ -101,19 +100,27 @@ void DataLoggerNode::tryLogData()
     last_loop_time_ = current_time;
     first_message_ = false;
 
-    // --- Extract and Write Data ---
-    std::string fish_pos_str = last_fish_msg_->data_e;
-    std::replace(fish_pos_str.begin(), fish_pos_str.end(), ',', ',');
+    // <<< FIX: Parse the new, more complex data string
+    std::string data_str = last_fish_msg_->data_e;
+    std::stringstream ss(data_str);
+    std::string final_pos_part, raw_pos_part, filtered_pos_part;
+
+    std::getline(ss, final_pos_part, ';');
+    std::getline(ss, raw_pos_part, ';');
+    std::getline(ss, filtered_pos_part, ';');
+
+    std::replace(final_pos_part.begin(), final_pos_part.end(), ',', ',');
 
     if (log_file_.is_open()) {
         log_file_ << last_fish_msg_->image_e.header.stamp << ","
-                  << fish_pos_str << ","
+                  << final_pos_part << ","       // final_x,final_y
+                  << raw_pos_part << ","         // raw_fish_x
+                  << filtered_pos_part << ","    // filtered_fish_x
                   << last_refuge_msg_->point.x << ","
                   << last_refuge_msg_->point.y << ","
                   << std::fixed << std::setprecision(4) << loop_duration_ms << "\n";
     }
 
-    // --- Reset flags to wait for the next new pair ---
     has_new_fish_data_ = false;
     has_new_refuge_data_ = false;
 }
@@ -122,7 +129,7 @@ std::string DataLoggerNode::createLogFile()
 {
     std::string package_path = ros::package::getPath("rectrial");
     if (package_path.empty()) {
-        ROS_ERROR("Could not find package 'rectrial'. Make sure it's in your ROS_PACKAGE_PATH.");
+        ROS_ERROR("Could not find package 'rectrial'.");
         return "";
     }
     auto now = std::chrono::system_clock::now();
@@ -135,8 +142,7 @@ std::string DataLoggerNode::createLogFile()
 
 void DataLoggerNode::stateCallback(const std_msgs::String::ConstPtr& msg)
 {
-    if (msg->data == "shutdown")
-    {
+    if (msg->data == "shutdown") {
         ROS_INFO("Shutdown command received. Closing Data Logger Node!");
         ros::shutdown();
     }
@@ -152,10 +158,7 @@ int main(int argc, char** argv)
     std::string package_path = ros::package::getPath("rectrial");
     if (!package_path.empty()) {
         std::string log_dir = package_path + "/logs";
-        const int dir_err = system(("mkdir -p " + log_dir).c_str());
-        if (dir_err == -1) {
-            ROS_WARN("Could not create log directory.");
-        }
+        system(("mkdir -p " + log_dir).c_str());
     }
 
     DataLogger::DataLoggerNode node(nh);

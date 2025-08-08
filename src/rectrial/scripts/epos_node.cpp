@@ -27,20 +27,17 @@ class MaxonMotorController
 public:
     MaxonMotorController() : nh_("~")
     {
-        loadParams();
-
-        // Initialize ROS subscribers and publishers
-        sub_motor_freq_ = root_nh_.subscribe("/set_motor_freq", 10, &MaxonMotorController::motorSetFreqCallback, this);
-        sub_state_ = root_nh_.subscribe("/set_state", 10, &MaxonMotorController::stateCallback, this);
-        
-        // <<< FIX 1: The node now subscribes to "/imager", which is the correct topic for motor commands from the controller.
-        sub_experiment_trigger_ = root_nh_.subscribe("/imager", 100, &MaxonMotorController::imageCallback, this);
-        
-        refuge_state_pub_ = root_nh_.advertise<geometry_msgs::PointStamped>("/refuge_state", 10);
-
-        if (!openDevice() || !prepareMotor() || !initializeMotor()) {
-            ros::shutdown();
-            return;
+        {
+            loadParams();
+            // This is now the ONLY subscriber in this node.
+            sub_command_ = root_nh_.subscribe("/imager", 100, &MaxonMotorController::commandCallback, this);
+            
+            refuge_state_pub_ = root_nh_.advertise<geometry_msgs::PointStamped>("/refuge_state", 10);
+    
+            if (!openDevice() || !prepareMotor() || !initializeMotor()) {
+                ros::shutdown();
+                return;
+            }
         }
 
         ROS_INFO("Maxon motor node initialized successfully.");
@@ -63,6 +60,8 @@ private:
     ros::Subscriber sub_motor_freq_;
     ros::Subscriber sub_experiment_trigger_;
     ros::Subscriber sub_state_;
+    ros::Subscriber sub_command_;
+
     
     bool is_open_loop_ = false;
     bool is_closed_loop_ = false;
@@ -88,6 +87,49 @@ private:
     double a_pos_ = 0.0; 
 
     double last_refuge_position_ = 0.0;
+
+    void commandCallback(const rectrial::pub_data::ConstPtr& msg)
+    {
+        if (msg->finish_c == "end") {
+            ROS_INFO("END command received. Homing motor for next trial.");
+            initializeMotor();
+            return;
+        }
+
+        // <<< FIX: Parse the new data string format
+        std::string data_str = msg->data_e;
+        std::stringstream ss_main(data_str);
+        std::string final_pos_part;
+
+        // 1. Get only the part before the first semicolon (e.g., "x,y")
+        std::getline(ss_main, final_pos_part, ';');
+
+        // 2. Parse that first part to get the x-coordinate
+        double target_position_float = 0.0;
+        std::stringstream ss_pos(final_pos_part);
+        std::string x_str;
+        if (std::getline(ss_pos, x_str, ',')) {
+             try {
+                target_position_float = std::stod(x_str);
+             } catch (const std::exception& e) {
+                ROS_ERROR("Failed to parse x-position from data_e: %s", msg->data_e.c_str());
+             }
+        }
+
+        // 3. Command the motor
+        unsigned int error_code = 0;
+        long target_position = static_cast<long>(target_position_float);
+        if (!VCS_MoveToPosition(key_handle_, node_id_, target_position, 1, 1, &error_code)) {
+            ROS_ERROR("VCS_MoveToPosition failed. Error: 0x%X", error_code);
+        }
+
+        // 4. Publish the commanded position for the logger
+        geometry_msgs::PointStamped refuge_msg;
+        refuge_msg.header.stamp = msg->image_e.header.stamp;
+        refuge_msg.point.x = target_position_float;
+        refuge_state_pub_.publish(refuge_msg);
+    }
+
 
     void loadParams() {
         int temp_node_id = 1;
@@ -221,11 +263,6 @@ private:
             is_gain_mode_ = true;
             reafferent_gain_ = std::stod(cmd.substr(5));
             ROS_INFO("Mode switched to: Gain Control with gain = %.2f", reafferent_gain_);
-        } else if (cmd.rfind("os:gain:", 0) == 0) {
-             is_gain_mode_ = true;
-             is_open_loop_ = true;
-             reafferent_gain_ = std::stod(cmd.substr(8));
-             ROS_INFO("Mode switched to: Open Loop Gain Control with gain = %.2f", reafferent_gain_);
         } else {
             try {
                 frequency_ = std::stod(cmd);
