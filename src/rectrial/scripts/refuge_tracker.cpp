@@ -21,7 +21,7 @@ enum class NodeState
 {
     WAITING_FOR_FIRST_FRAME,
     SELECTING_ROI, // ROI = Region of Interest
-    PUBLISHING_DATA
+    PUBLISHING_DATA //tracking yani
 };
 
 // A simple struct to hold data for the mouse callback.
@@ -57,7 +57,7 @@ private:
 
     // Core logic
     void processFrame(const cv::Mat& frame, const std_msgs::Header& header);
-    void initializeRefuge(const cv::Mat& frame);
+    void initializeRefuge(const cv::Mat& frame); //balıkta tracker initialize ederken burada refuge ediyor
 
     // ROS Communication
     ros::NodeHandle nh_;
@@ -149,10 +149,9 @@ void RefugeTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Heade
 
             cv::Point center(refuge_bbox_.x + refuge_bbox_.width / 2, refuge_bbox_.y + refuge_bbox_.height / 2);
             cv::circle(display_frame, center, 4, cv::Scalar(0, 255, 0), -1);
-            //cv::putText(display_frame, "Refuge", cv::Point(refuge_bbox_.x, refuge_bbox_.y - 10), cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 255, 0), 2);
 
             rectrial::pub_data refuge_msg;
-            refuge_msg.image_e = *cv_bridge::CvImage(header, "mono8", display_frame).toImageMsg();
+            refuge_msg.image_e = *cv_bridge::CvImage(header, "bgr8", display_frame).toImageMsg();
             refuge_msg.data_e = std::to_string(center.x) + "," + std::to_string(center.y);
             refuge_data_pub_.publish(refuge_msg);
 

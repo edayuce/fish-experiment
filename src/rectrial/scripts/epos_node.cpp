@@ -32,7 +32,7 @@ public:
             // This is now the ONLY subscriber in this node.
             sub_command_ = root_nh_.subscribe("/imager", 100, &MaxonMotorController::commandCallback, this);
             
-            refuge_state_pub_ = root_nh_.advertise<geometry_msgs::PointStamped>("/refuge_state", 10);
+            refuge_state_pub_ = root_nh_.advertise<rectrial::pub_data>("/refuge_state", 10);
     
             if (!openDevice() || !prepareMotor() || !initializeMotor()) {
                 ros::shutdown();
@@ -72,6 +72,8 @@ private:
     double gain_limit_ = 10.0;
     double frequency_ = 2.05;
     double amp_mm_ = 10.0;
+    double m_counts_per_mm;
+    double m_pixels_per_mm;
     
     std::chrono::steady_clock::time_point loop_start_time_;
     int frame_counter_ = 0;
@@ -96,38 +98,34 @@ private:
             return;
         }
 
-        // <<< FIX: Parse the new data string format
-        std::string data_str = msg->data_e;
-        std::stringstream ss_main(data_str);
-        std::string final_pos_part;
-
-        // 1. Get only the part before the first semicolon (e.g., "x,y")
-        std::getline(ss_main, final_pos_part, ';');
-
-        // 2. Parse that first part to get the x-coordinate
-        double target_position_float = 0.0;
-        std::stringstream ss_pos(final_pos_part);
+        // 1. Parse the final position IN PIXELS from the message
+        double target_position_pixels = 0.0;
+        std::stringstream ss(msg->data_e);
         std::string x_str;
-        if (std::getline(ss_pos, x_str, ',')) {
+        if (std::getline(ss, x_str, ',')) {
              try {
-                target_position_float = std::stod(x_str);
+                target_position_pixels = std::stod(x_str);
              } catch (const std::exception& e) {
                 ROS_ERROR("Failed to parse x-position from data_e: %s", msg->data_e.c_str());
              }
         }
+        
+        // <<< FIX: Convert the pixel command to motor counts
+        // Formula: counts = pixels * (mm / pixel) * (counts / mm)
+        double target_position_counts = target_position_pixels * (1.0 / m_pixels_per_mm) * m_counts_per_mm;
 
-        // 3. Command the motor
+        // 3. Command the motor with the value in COUNTS
         unsigned int error_code = 0;
-        long target_position = static_cast<long>(target_position_float);
+        long target_position = static_cast<long>(target_position_counts);
         if (!VCS_MoveToPosition(key_handle_, node_id_, target_position, 1, 1, &error_code)) {
             ROS_ERROR("VCS_MoveToPosition failed. Error: 0x%X", error_code);
         }
 
-        // 4. Publish the commanded position for the logger
-        geometry_msgs::PointStamped refuge_msg;
-        refuge_msg.header.stamp = msg->image_e.header.stamp;
-        refuge_msg.point.x = target_position_float;
+        // 4. Publish the commanded position for the logger and controller's display
+        rectrial::pub_data refuge_msg;
+        refuge_msg.data_e = std::to_string(target_position_pixels) + "," + std::to_string(0);
         refuge_state_pub_.publish(refuge_msg);
+
     }
 
 
@@ -144,15 +142,19 @@ private:
         
         nh_.param<double>("amplitude_mm", amp_mm_, 10.0);
         nh_.param<double>("gain_limit", gain_limit_, 10.0);
-        
-        double mm_per_rev = 10.0;
-        double encoder_count = 512.0;
-        double gear_ratio = (624.0 / 35.0) * 4.0;
-        
-        double count_per_rev = encoder_count * gear_ratio;
-        double count_per_mm = count_per_rev / mm_per_rev;
-        a_pos_ = count_per_mm * amp_mm_;
 
+        nh_.param<double>("pixels_per_mm", m_pixels_per_mm, 10.0);
+        if (m_pixels_per_mm <= 0) {
+             ROS_ERROR("pixels_per_mm must be positive! Defaulting to 10.0");
+             m_pixels_per_mm = 10.0;
+        }
+
+        double mm_per_rev = 10.0, encoder_count = 512.0, gear_ratio = (624.0 / 35.0) * 4.0;
+        double count_per_rev = encoder_count * gear_ratio;
+        m_counts_per_mm = count_per_rev / mm_per_rev;
+
+
+        ROS_INFO("Motor conversion factors loaded: %.2f counts/mm, %.2f pixels/mm", m_counts_per_mm, m_pixels_per_mm);
         ROS_INFO("--- Motor Settings ---");
         ROS_INFO("Node ID: %d", node_id_);
         ROS_INFO("Device: %s on Port: %s", device_name_.c_str(), port_name_.c_str());
@@ -274,7 +276,7 @@ private:
         }
     }
 
-    void imageCallback(const rectrial::pub_data::ConstPtr& msg)
+/*     void imageCallback(const rectrial::pub_data::ConstPtr& msg)
     {
         if (msg->finish_c == "start") {
             loop_start_time_ = std::chrono::steady_clock::now();
@@ -335,9 +337,9 @@ private:
         refuge_msg.point.y = 0;
         refuge_msg.point.z = 0;
         refuge_state_pub_.publish(refuge_msg);
-    }
+    } */
 
-    double calculateSumOfSines(double time_ms) {
+/*     double calculateSumOfSines(double time_ms) {
         static const double freqs[NUM_SINE_FREQUENCIES] = {0.1, 0.15, 0.25, 0.35, 0.55, 0.65, 0.85, 0.95, 1.15, 1.45, 1.55, 1.85, 2.05};
         static const double velPH[NUM_SINE_FREQUENCIES] = {0.2162, 2.5980, 0.0991, 0.2986, 2.9446, 2.5794, 2.8213, 0.0693, 1.4556, 0.3746, 1.0430, 2.9469, 2.6706};
         
@@ -352,7 +354,7 @@ private:
         double pos_x = -reafferent_gain_ * fish_pos_x / REAFFERENT_SCALING_FACTOR;
         pos_x = std::max(-gain_limit_, std::min(gain_limit_, pos_x));
         return a_pos_ * pos_x;
-    }
+    } */
 };
 
 int main(int argc, char** argv)

@@ -19,6 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
   roslint
   message_generation
   geometry_msgs
+  message_filters
 )
 
 # Find OpenCV
@@ -99,14 +100,15 @@ target_include_directories(Epos PUBLIC
 
 
 # --- Executables ---
-add_executable(basler_camera_node       scripts/camera_node.cpp)
-add_executable(experiment_controller    scripts/experiment_controller.cpp scripts/adaptive_filter.cpp)
-add_executable(video_recorder_node      scripts/rec_node.cpp)
-add_executable(epos_node                scripts/epos_node.cpp)
-add_executable(real_time_tracker        scripts/real_time_tracker.cpp)
-add_executable(main_node                scripts/main_node.cpp)
-add_executable(csv_writer_node          scripts/csv_writer.cpp)
-add_executable(refuge_tracker_node      scripts/refuge_tracker.cpp)
+add_executable(basler_camera_node         scripts/camera_node.cpp)
+add_executable(experiment_controller      scripts/experiment_controller.cpp scripts/adaptive_filter.cpp)
+add_executable(video_recorder_node        scripts/rec_node.cpp)
+add_executable(epos_node                  scripts/epos_node.cpp)
+add_executable(real_time_tracker          scripts/real_time_tracker.cpp)
+add_executable(main_node                  scripts/main_node.cpp)
+add_executable(csv_writer_node            scripts/csv_writer.cpp)
+add_executable(refuge_tracker_node        scripts/refuge_tracker.cpp)
+add_executable(throttler_node             scripts/throttler_node.cpp)
 
 
 
@@ -173,17 +175,24 @@ target_link_libraries(refuge_tracker_node
   ${OpenCV_LIBRARIES}
 )
 
+target_link_libraries(throttler_node 
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
+
 # ===================================================================
 # Dependencies
 # ===================================================================
 # Ensure messages are generated before nodes that use them are built
-add_dependencies(basler_camera_node    ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(experiment_controller ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(video_recorder_node   ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(epos_node             ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(main_node             ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(real_time_tracker     ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(csv_writer_node       ${PROJECT_NAME}_generate_messages_cpp)
-add_dependencies(refuge_tracker_node   ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(basler_camera_node           ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(experiment_controller        ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(video_recorder_node          ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(epos_node                    ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(main_node                    ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(real_time_tracker            ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(csv_writer_node              ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(refuge_tracker_node          ${PROJECT_NAME}_generate_messages_cpp)
+add_dependencies(throttler_node               ${PROJECT_NAME}_generate_messages_cpp)
+
 
 

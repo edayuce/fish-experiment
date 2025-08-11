@@ -41,7 +41,8 @@ public:
 private:
     // Callbacks
     void fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
-    void refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg);
+    //void refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg);
+    void refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void motorCommandCallback(const std_msgs::String::ConstPtr& msg);
     void filterStateCallback(const std_msgs::Bool::ConstPtr& msg);
@@ -71,6 +72,7 @@ private:
     std::string experiment_id_;
     long frame_counter_;
     rectrial::pub_data::ConstPtr last_fish_tracker_msg_;
+    rectrial::pub_data::ConstPtr last_refuge_tracker_msg;
     bool has_fish_data_ = false;
     bool has_refuge_data_ = false;
     bool m_is_filter_enabled = false;
@@ -85,6 +87,8 @@ private:
     int refuge_bbox_width_;
     int refuge_bbox_height_;
     double m_count_per_mm;
+    double m_pixels_per_mm;
+    double m_amplitude_pixels; // Amplitude for sine waves, now in pixels
 
     // CSV Open Loop
     std::string csv_file_path_;
@@ -94,6 +98,8 @@ private:
     // Sine Wave Calculation
     double a_pos_ = 0.0; // Amplitude in motor counts
     std::chrono::steady_clock::time_point trial_start_time_;
+    // <<< NEW: ROS-based timer for the experiment duration
+    ros::Time trial_start_time_ros_;
 
     GLWindow* gl_window_ = nullptr;
 };
@@ -120,25 +126,27 @@ ControllerNode::ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
         loadCsvFile(csv_file_path_);
     }
 
-    
-    // --- Sine Wave Constants Setup ---
+    pnh_.param<double>("pixels_per_mm", m_pixels_per_mm, 10.0);
+    if (m_pixels_per_mm <= 0) {
+        ROS_ERROR("pixels_per_mm must be a positive value!");
+        m_pixels_per_mm = 10.0;
+    }
+
+    // <<< MODIFIED: Calculate sine wave amplitude in PIXELS, not motor counts
     double amp_mm = 10.0;
     pnh_.param<double>("amplitude_mm", amp_mm, 10.0);
-    double mm_per_rev = 10.0, encoder_count = 512.0, gear_ratio = (624.0 / 35.0) * 4.0;
-    double count_per_rev = encoder_count * gear_ratio;
-    m_count_per_mm = count_per_rev / mm_per_rev; // Store the conversion factor
-    a_pos_ = m_count_per_mm * amp_mm;            // Use it to calculate a_pos_
+    m_amplitude_pixels = amp_mm * m_pixels_per_mm;
 
     // --- ROS Communication ---
     experiment_data_pub_ = nh_.advertise<rectrial::pub_data>("imager", 10);
     fish_tracker_sub_ = nh_.subscribe("/imager_processed", 5, &ControllerNode::fishTrackerCallback, this);
-    refuge_state_sub_ = nh_.subscribe("/refuge_state", 5, &ControllerNode::refugeStateCallback, this);
+    refuge_state_sub_ = nh_.subscribe("/refuge_data", 5, &ControllerNode::refugeTrackerCallback, this);
     state_sub_ = nh_.subscribe("set_state", 10, &ControllerNode::stateCallback, this);
     motor_command_sub_ = nh_.subscribe("set_motor_freq", 10, &ControllerNode::motorCommandCallback, this);
     filter_state_sub_ = nh_.subscribe("/set_filter_state", 1, &ControllerNode::filterStateCallback, this);
 
-    prev_pos_ = cv::Point2f(0.0f, 0.0f);
-    refuge_pos_ = cv::Point2f(0.0f, 0.0f);
+    //prev_pos_ = cv::Point2f(0.0f, 0.0f);
+    //refuge_pos_ = cv::Point2f(0.0f, 0.0f);
     gl_window_ = new GLWindow(0, 0);
     gl_window_->setTitle("Experiment Control Screen");
 }
@@ -212,16 +220,17 @@ void ControllerNode::fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg
 }
 
 // NEW Callback for data from the RefugeTrackerNode
-/* void ControllerNode::refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg)
+void ControllerNode::refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg)
 {
+    last_refuge_tracker_msg = msg;
     refuge_pos_ = parsePosition(msg->data_e);
     if (!has_refuge_data_) {
         has_refuge_data_ = true;
         ROS_INFO("Received first data packet from refuge tracker.");
     }
-} */
+}
 
-void ControllerNode::refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg)
+/* void ControllerNode::refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg)
 {
     // The position is directly available in the message, no parsing needed
     refuge_pos_.x = msg->point.x;
@@ -231,7 +240,7 @@ void ControllerNode::refugeStateCallback(const geometry_msgs::PointStamped::Cons
         has_refuge_data_ = true;
         ROS_INFO("Received first data packet from refuge state (epos_node).");
     }
-}
+} */
 
 void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg) {
     
@@ -281,13 +290,20 @@ void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg)
         }
     }
     ROS_INFO("Switched to mode: %s", controlModeToString().c_str());
+
+    if (m_filter_x) {
+        m_filter_x->updateFrequencies(freqs_to_set);
+    }
+
 }
 
 // Draws the current state and data onto the image for display.
 void ControllerNode::drawVisuals(cv::Mat& frame, bool draw_text_overlays) {
     // --- Part 1: Always draw the tracking boxes ---
     if(has_refuge_data_) {
-        cv::Rect2d refuge_box(refuge_pos_.x - refuge_bbox_width_ / 2.0, refuge_pos_.y - refuge_bbox_height_ / 2.0, refuge_bbox_width_, refuge_bbox_height_);
+        cv::Rect2d refuge_box(refuge_pos_.x - refuge_bbox_width_ / 2.0,
+                              refuge_pos_.y - refuge_bbox_height_ / 2.0,
+                              refuge_bbox_width_, refuge_bbox_height_);
         cv::rectangle(frame, refuge_box, cv::Scalar(255, 255, 255), 2);
         cv::Point refuge_center(refuge_box.x + refuge_box.width / 2, refuge_box.y + refuge_box.height / 2);
         cv::circle(frame, refuge_center, 4, cv::Scalar(0, 0, 0), -1);
@@ -392,6 +408,16 @@ void ControllerNode::spin()
                 if (!recording_frame.empty()) {
                     cv::Mat display_frame = recording_frame.clone();
                     if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
+
+                        if ((ros::Time::now() - trial_start_time_ros_).toSec() >= 60.0) {
+                            ROS_INFO("Experiment time limit (60s) reached. Stopping automatically.");
+                            drawVisuals(recording_frame, false);
+                            publishCalculatedData(recording_frame, true, 0,0); // Publish "end" message
+                            node_state_ = NodeState::EXPERIMENT_DONE;
+                            // Use 'continue' to skip the rest of this loop iteration
+                            // and prevent a double-stop if space is pressed simultaneously.
+                            continue; 
+                        }
                         
                         // --- Centralized Calculation Logic ---
                         double raw_fish_pos_x = fish_pos_.x;
@@ -410,26 +436,30 @@ void ControllerNode::spin()
                         switch (control_mode_) {
                             case ControlMode::OPEN_LOOP:
                                 if (!csv_positions_.empty()) {
+                                    // <<< MODIFIED: Convert position from mm (in CSV) to pixels
                                     double position_mm = csv_positions_[csv_index_];
-                                    //Convert from mm to motor counts
-                                    new_pos_.x = position_mm * m_count_per_mm;
+                                    new_pos_.x = position_mm * m_pixels_per_mm;
+                                    new_pos_.y = 0;
                                     csv_index_ = (csv_index_ + 1) % csv_positions_.size();
                                 } else { new_pos_ = cv::Point2f(0,0); }
                                 break;
                             
                             case ControlMode::CLOSED_LOOP_GAIN:
+                                // This logic is already in pixels, so it's correct
                                 new_pos_ = (processed_fish_pos * gain_) + prev_pos_;
                                 break;
 
                             case ControlMode::SUM_OF_SINES: {
+                                // <<< MODIFIED: This calculation now uses pixel amplitude
                                 double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
-                                new_pos_.x = calculateSumOfSines(time_ms);
+                                new_pos_.x = calculateSumOfSines(time_ms); // This function is now pixel-based
                                 new_pos_.y = 0;
                                 break;
                             }
                             case ControlMode::FIXED_FREQ: {
+                                // <<< MODIFIED: This calculation now uses pixel amplitude
                                 double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
-                                new_pos_.x = (a_pos_ / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
+                                new_pos_.x = (m_amplitude_pixels / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
                                 new_pos_.y = 0;
                                 break;
                             }
@@ -438,6 +468,7 @@ void ControllerNode::spin()
                         drawVisuals(recording_frame, false); 
                         publishCalculatedData(recording_frame, false, raw_fish_pos_x, filtered_fish_pos_x);
                         prev_pos_ = new_pos_;
+                        
                         frame_counter_++;
                     }
                     drawVisuals(display_frame, true);
@@ -455,10 +486,12 @@ void ControllerNode::spin()
                     node_state_ = NodeState::EXPERIMENT_RUNNING;
                     frame_counter_ = 0;
                     csv_index_ = 0;
-                    prev_pos_ = cv::Point2f(0.0f, 0.0f);
+                    prev_pos_ = refuge_pos_;
                     new_pos_ = cv::Point2f(0.0f, 0.0f);
                     experiment_id_ = getCurrentTimestamp();
                     trial_start_time_ = std::chrono::steady_clock::now();
+                    // <<< NEW: Record the ROS time when the experiment starts
+                    trial_start_time_ros_ = ros::Time::now(); 
 
                     if (m_filter_x) {
                         m_filter_x->primeBuffer(fish_pos_.x);
@@ -466,9 +499,9 @@ void ControllerNode::spin()
                     }
 
                 } else if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
-                    cv::Mat frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
-                    drawVisuals(frame, false);
-                    publishCalculatedData(frame, true, 0, 0);
+                    cv::Mat frame_fish = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
+                    drawVisuals(frame_fish, true);
+                    publishCalculatedData(frame_fish, true, 0, 0);
                     node_state_ = NodeState::EXPERIMENT_DONE;
                 } else if (node_state_ == NodeState::EXPERIMENT_DONE) {
                     node_state_ = NodeState::WAITING_FOR_START;
@@ -485,7 +518,7 @@ double ControllerNode::calculateSumOfSines(double time_ms) {
     static const double velPH[NUM_SINE_FREQUENCIES] = {0.2162, 2.5980, 0.0991, 0.2986, 2.9446, 2.5794, 2.8213, 0.0693, 1.4556, 0.3746, 1.0430, 2.9469, 2.6706};
     double position = 0.0;
     for (int i = 0; i < NUM_SINE_FREQUENCIES; ++i) {
-        position += (a_pos_ / (2.0 * M_PI * freqs[i])) * sin(2.0 * M_PI * freqs[i] * time_ms / 1000.0 + velPH[i] + (M_PI / 2.0));
+        position += (m_amplitude_pixels / (2.0 * M_PI * freqs[i])) * sin(2.0 * M_PI * freqs[i] * time_ms / 1000.0 + velPH[i] + (M_PI / 2.0));
     }
     return position;
 }

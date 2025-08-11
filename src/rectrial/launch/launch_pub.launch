@@ -7,17 +7,24 @@
 
 <node pkg="rectrial" type="experiment_controller" name="experiment_controller_node" output="screen">
     <param name="csv_file_path" value="$(find rectrial)/data/positions.csv" />
+    <param name="pixels_per_mm" value="3.5" />
 </node>
 
 
 <node pkg="rectrial" type="real_time_tracker" name="tracker" output="screen"> </node>
 
-<node pkg = "rectrial" name ="epos_node"    	type= "epos_node" output="screen" launch-prefix="taskset -c 4"/>
+<node pkg = "rectrial" name ="epos_node"    	type= "epos_node" output="screen" launch-prefix="taskset -c 4">
+	<param name="pixels_per_mm" value="3.5" />
+</node>
 
 <node pkg="rectrial" type="csv_writer_node" name="csv_writer_node" output="screen" />
 
 <node pkg="rectrial" type="refuge_tracker_node" name="refuge_tracker_node" output="screen" />
 
 <node pkg="rectrial" type="video_recorder_node" name="video_recorder_node" output="screen" />
+
+<node pkg="rectrial" type="throttler_node" name="throttler_node" output="screen">
+    <param name="rate" value="30.0" />
+</node>
 
 </launch>

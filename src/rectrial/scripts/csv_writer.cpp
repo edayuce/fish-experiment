@@ -24,7 +24,7 @@ public:
 private:
     // We now have two separate callbacks
     void fishCallback(const rectrial::pub_data::ConstPtr& msg);
-    void refugeCallback(const geometry_msgs::PointStamped::ConstPtr& msg);
+    void refugeCallback(const rectrial::pub_data::ConstPtr& msg);
     
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void tryLogData(); // The new function to handle logging
@@ -33,11 +33,11 @@ private:
     ros::NodeHandle nh_;
     ros::Subscriber state_sub_;
     ros::Subscriber fish_sub_;
-    ros::Subscriber refuge_sub_;
+    ros::Subscriber static_refuge_sub_;
 
     // Member variables to store the latest message from each topic
     rectrial::pub_data::ConstPtr last_fish_msg_;
-    geometry_msgs::PointStamped::ConstPtr last_refuge_msg_;
+    rectrial::pub_data::ConstPtr last_refuge_msg_;
     bool has_new_fish_data_ = false;
     bool has_new_refuge_data_ = false;
 
@@ -56,12 +56,12 @@ DataLoggerNode::DataLoggerNode(ros::NodeHandle& nh) : nh_(nh)
     if (!log_file_.is_open()) { ROS_ERROR("Failed to open log file: %s", log_file_path_.c_str()); ros::shutdown(); return; }
     
     // <<< FIX: Add the new columns to the CSV header
-    log_file_ << "timestamp,final_pos_x,final_pos_y,raw_fish_pos_x,filtered_fish_pos_x,refuge_pos_x,refuge_pos_y,loop_time_ms\n";
+    log_file_ << "raw_fish_pos_x,filtered_fish_pos_x,refuge_pos_x,loop_time_ms\n";
     ROS_INFO("Logging data to: %s", log_file_path_.c_str());
 
     // Initialize two separate, standard ROS subscribers
     fish_sub_ = nh_.subscribe("/imager", 10, &DataLoggerNode::fishCallback, this); // Listen to the final controller output
-    refuge_sub_ = nh_.subscribe("/refuge_state", 10, &DataLoggerNode::refugeCallback, this);
+    static_refuge_sub_ = nh_.subscribe("/refuge_data", 10, &DataLoggerNode::refugeCallback, this);
     state_sub_ = nh_.subscribe("/set_state", 10, &DataLoggerNode::stateCallback, this);
     
     ROS_INFO("Data Logger node initialized. Waiting for data from both topics...");
@@ -76,7 +76,7 @@ void DataLoggerNode::fishCallback(const rectrial::pub_data::ConstPtr& msg)
     tryLogData(); // Attempt to log after receiving fish data
 }
 
-void DataLoggerNode::refugeCallback(const geometry_msgs::PointStamped::ConstPtr& msg)
+void DataLoggerNode::refugeCallback(const rectrial::pub_data::ConstPtr& msg)
 {
     last_refuge_msg_ = msg;
     has_new_refuge_data_ = true;
@@ -101,24 +101,26 @@ void DataLoggerNode::tryLogData()
     first_message_ = false;
 
     // <<< FIX: Parse the new, more complex data string
-    std::string data_str = last_fish_msg_->data_e;
-    std::stringstream ss(data_str);
+    std::string fish_data_str = last_fish_msg_->data_e;
+    std::string refuge_data_str = last_refuge_msg_->data_e;
+    std::stringstream ss(fish_data_str);
     std::string final_pos_part, raw_pos_part, filtered_pos_part;
 
     std::getline(ss, final_pos_part, ';');
     std::getline(ss, raw_pos_part, ';');
     std::getline(ss, filtered_pos_part, ';');
 
+    std::stringstream ss_r(refuge_data_str);
+    std::string refuge_data_x;
+    std::getline(ss_r, refuge_data_x, ',');
+
     std::replace(final_pos_part.begin(), final_pos_part.end(), ',', ',');
 
     if (log_file_.is_open()) {
-        log_file_ << last_fish_msg_->image_e.header.stamp << ","
-                  << final_pos_part << ","       // final_x,final_y
-                  << raw_pos_part << ","         // raw_fish_x
+        log_file_ << raw_pos_part << ","         // raw_fish_x
                   << filtered_pos_part << ","    // filtered_fish_x
-                  << last_refuge_msg_->point.x << ","
-                  << last_refuge_msg_->point.y << ","
-                  << std::fixed << std::setprecision(4) << loop_duration_ms << "\n";
+                  << refuge_data_x << ","
+                  << std::fixed << std::setprecision(4) << loop_duration_ms << "\n";   
     }
 
     has_new_fish_data_ = false;
