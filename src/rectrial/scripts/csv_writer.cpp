@@ -3,6 +3,7 @@
 #include <ros/ros.h>
 #include <ros/package.h>
 #include <std_msgs/String.h>
+#include <std_msgs/Float64.h>
 #include <geometry_msgs/PointStamped.h>
 #include <rectrial/pub_data.h> // Custom message header
 
@@ -25,7 +26,8 @@ private:
     // We now have two separate callbacks
     void fishCallback(const rectrial::pub_data::ConstPtr& msg);
     void refugeCallback(const rectrial::pub_data::ConstPtr& msg);
-    
+    //void elapsedCallback(const std_msgs::Float64::ConstPtr& msg);
+
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void tryLogData(); // The new function to handle logging
     std::string createLogFile();
@@ -34,12 +36,18 @@ private:
     ros::Subscriber state_sub_;
     ros::Subscriber fish_sub_;
     ros::Subscriber static_refuge_sub_;
+    //ros::Subscriber elapsed_ms_sub_;
 
     // Member variables to store the latest message from each topic
     rectrial::pub_data::ConstPtr last_fish_msg_;
     rectrial::pub_data::ConstPtr last_refuge_msg_;
+    //std_msgs::Float64::ConstPtr last_time_msg_;
+    
     bool has_new_fish_data_ = false;
     bool has_new_refuge_data_ = false;
+    //bool has_new_time_data_ = false;
+
+    double elapsed_ms;
 
     // Logging
     std::ofstream log_file_;
@@ -63,6 +71,8 @@ DataLoggerNode::DataLoggerNode(ros::NodeHandle& nh) : nh_(nh)
     fish_sub_ = nh_.subscribe("/imager", 10, &DataLoggerNode::fishCallback, this); // Listen to the final controller output
     static_refuge_sub_ = nh_.subscribe("/refuge_data", 10, &DataLoggerNode::refugeCallback, this);
     state_sub_ = nh_.subscribe("/set_state", 10, &DataLoggerNode::stateCallback, this);
+    //elapsed_ms_sub_ = nh_.subscribe("/loop_elapsed_time", 10, &DataLoggerNode::elapsedCallback, this);
+
     
     ROS_INFO("Data Logger node initialized. Waiting for data from both topics...");
 }
@@ -83,9 +93,15 @@ void DataLoggerNode::refugeCallback(const rectrial::pub_data::ConstPtr& msg)
     tryLogData(); // Attempt to log after receiving refuge data
 }
 
+/* void DataLoggerNode::elapsedCallback(const std_msgs::Float64::ConstPtr& msg) {
+    elapsed_ms = msg->data;
+    has_new_time_data_ = true;
+    tryLogData();
+} */
+
 void DataLoggerNode::tryLogData()
 {
-    if (!has_new_fish_data_ || !has_new_refuge_data_) {
+    if (!has_new_fish_data_ || !has_new_refuge_data_ ) {
         return;
     }
 

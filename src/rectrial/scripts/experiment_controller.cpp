@@ -3,6 +3,7 @@
 #include <ros/ros.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Float64.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 #include <sensor_msgs/image_encodings.h>
@@ -61,6 +62,7 @@ private:
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
     ros::Publisher experiment_data_pub_;
+    //ros::Publisher elapsed_pub_;
     ros::Subscriber fish_tracker_sub_;
     ros::Subscriber refuge_state_sub_;
     ros::Subscriber state_sub_;
@@ -139,11 +141,13 @@ ControllerNode::ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
 
     // --- ROS Communication ---
     experiment_data_pub_ = nh_.advertise<rectrial::pub_data>("imager", 10);
+    //elapsed_pub_= nh.advertise<std_msgs::Float64>("loop_elapsed_time", 10);
     fish_tracker_sub_ = nh_.subscribe("/imager_processed", 5, &ControllerNode::fishTrackerCallback, this);
     refuge_state_sub_ = nh_.subscribe("/refuge_data", 5, &ControllerNode::refugeTrackerCallback, this);
     state_sub_ = nh_.subscribe("set_state", 10, &ControllerNode::stateCallback, this);
     motor_command_sub_ = nh_.subscribe("set_motor_freq", 10, &ControllerNode::motorCommandCallback, this);
     filter_state_sub_ = nh_.subscribe("/set_filter_state", 1, &ControllerNode::filterStateCallback, this);
+    
 
     //prev_pos_ = cv::Point2f(0.0f, 0.0f);
     //refuge_pos_ = cv::Point2f(0.0f, 0.0f);
@@ -394,9 +398,11 @@ std::string ControllerNode::controlModeToString()
 
 void ControllerNode::spin()
 {
+    //ros::WallDuration desired_loop_time(0.04);
     ros::Rate rate(30);
     while (ros::ok())
     {
+        //ros::WallTime start_time = ros::WallTime::now();
         ros::spinOnce();
         if (node_state_ == NodeState::WAITING_FOR_DATA && has_fish_data_) {
             node_state_ = NodeState::WAITING_FOR_START;
@@ -424,11 +430,9 @@ void ControllerNode::spin()
                         double filtered_fish_pos_x = raw_fish_pos_x; // Default to raw if filter is off
 
                         if (m_is_filter_enabled) {
-                            if (control_mode_ == ControlMode::SUM_OF_SINES) {
-                                filtered_fish_pos_x = 0.0;
-                            } else {
+
                                 filtered_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
-                            }
+
                         }
                         
                         cv::Point2f processed_fish_pos(filtered_fish_pos_x, fish_pos_.y);
@@ -444,10 +448,20 @@ void ControllerNode::spin()
                                 } else { new_pos_ = cv::Point2f(0,0); }
                                 break;
                             
-                            case ControlMode::CLOSED_LOOP_GAIN:
-                                // This logic is already in pixels, so it's correct
-                                new_pos_ = (processed_fish_pos * gain_) + prev_pos_;
+                            case ControlMode::CLOSED_LOOP_GAIN: { // Add braces for local variable scope
+                                // <<< FIX: This is the new, correct closed-loop logic
+                                // 1. Calculate the baseline single sine wave stimulus
+                                double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
+                                double baseline_pos = (m_amplitude_pixels / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
+
+                                // 2. Calculate the feedback component from the fish's position
+                                double feedback_pos = processed_fish_pos.x * gain_;
+
+                                // 3. The new position is the sum of the baseline and the feedback
+                                new_pos_.x = baseline_pos + feedback_pos;
+                                new_pos_.y = 0;
                                 break;
+                            }
 
                             case ControlMode::SUM_OF_SINES: {
                                 // <<< MODIFIED: This calculation now uses pixel amplitude
@@ -472,6 +486,7 @@ void ControllerNode::spin()
                         frame_counter_++;
                     }
                     drawVisuals(display_frame, true);
+
                     if (gl_window_) {
                         gl_window_->updateImage(display_frame.ptr(0), display_frame.cols, display_frame.rows, GL_BGR);
                     }
@@ -491,7 +506,7 @@ void ControllerNode::spin()
                     experiment_id_ = getCurrentTimestamp();
                     trial_start_time_ = std::chrono::steady_clock::now();
                     // <<< NEW: Record the ROS time when the experiment starts
-                    trial_start_time_ros_ = ros::Time::now(); 
+                    trial_start_time_ros_ = ros::Time::now();
 
                     if (m_filter_x) {
                         m_filter_x->primeBuffer(fish_pos_.x);
@@ -508,7 +523,19 @@ void ControllerNode::spin()
                 }
              }
         }
-        rate.sleep();
+/*         ros::WallDuration elapsed = ros::WallTime::now() - start_time;
+        ros::WallDuration sleep_time = desired_loop_time - elapsed;
+
+        std_msgs::Float64 elapsed_msg;
+        elapsed_msg.data = elapsed.toSec() * 1000.0;
+        elapsed_pub_.publish(elapsed_msg);
+
+        if (sleep_time.toSec() > 0) {
+            sleep_time.sleep();
+        } else {
+            ROS_WARN_THROTTLE(1, "Loop overrun by %.2f ms", -sleep_time.toSec() * 1000);
+        } */
+       rate.sleep();
     }
 }
 
