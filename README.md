@@ -16,9 +16,6 @@ Before you begin, ensure you have the following installed:
     sudo apt-get update
     sudo apt-get install python3-gi gir1.2-gtk-3.0
     ```
-*   **Jetson GPIO:** If running on a Jetson device.
-    ```bash
-    pip install Jetson.GPIO
     ```
 *   **SMbus:** For I2C communication.
     ```bash
@@ -56,10 +53,16 @@ Before you begin, ensure you have the following installed:
     ```bash
     source devel/setup.bash
     ```
+2. **Start master:**
+   Open a terminal, run: 
+   ```bash
+   roscore
+   ```
 
-2.  **Run the GUI:**
+3.  **Run the GUI:**
+    Click + top-left corner, open second termial and run:
     ```bash
-    python3 Trial_DesktopGui.py
+    python3 src/rectrial/scripts/my_gui.py
     ```
 
 This will launch the main control window for the experiment.

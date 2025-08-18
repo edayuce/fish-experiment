@@ -11,6 +11,7 @@
 
 // Include your custom message header
 #include <rectrial/pub_data.h>
+#include <cmath>
 
 // Use a namespace to keep the code organized
 namespace RefugeTracker
@@ -147,7 +148,7 @@ void RefugeTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Heade
                 cv::putText(display_frame, "Tracking Failure", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 0, 255), 2);
             }
 
-            cv::Point center(refuge_bbox_.x + refuge_bbox_.width / 2, refuge_bbox_.y + refuge_bbox_.height / 2);
+            cv::Point center(std::round(refuge_bbox_.x + refuge_bbox_.width / 2), std::round(refuge_bbox_.y + refuge_bbox_.height / 2));
             cv::circle(display_frame, center, 4, cv::Scalar(0, 0, 0), -1);
 
             rectrial::pub_data refuge_msg;
@@ -199,7 +200,7 @@ void RefugeTrackerNode::initializeRefuge(const cv::Mat& frame)
     params.number_of_scales = 1;         // only evaluate single scale
 
     
-    tracker_ = cv::TrackerCSRT::create(params);
+    tracker_ = cv::TrackerCSRT::create();
     tracker_->init(frame, refuge_bbox_);
 
     cv::destroyWindow(SELECTION_WINDOW_NAME_);

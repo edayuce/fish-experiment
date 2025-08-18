@@ -10,6 +10,7 @@
 
 // Include your custom message header
 #include <rectrial/pub_data.h>
+#include <cmath>
 
 // Use a namespace to keep the code organized
 namespace OnlineTracker
@@ -144,7 +145,8 @@ void OnlineTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Heade
                 cv::putText(display_frame, "Tracking Failure", cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 0, 255), 2);
             }
             
-            cv::Point center(tracking_bbox_.x + tracking_bbox_.width / 2, tracking_bbox_.y + tracking_bbox_.height / 2);
+            // This rounds to the nearest pixel, making the result stable
+            cv::Point center(std::round(tracking_bbox_.x + tracking_bbox_.width / 2), std::round(tracking_bbox_.y + tracking_bbox_.height / 2));
             // Draw a black dot in the center
             cv::circle(display_frame, center, 4, cv::Scalar(0, 0, 0), -1);
 
@@ -183,7 +185,7 @@ void OnlineTrackerNode::initializeTracker(const cv::Mat& frame) {
     params.psr_threshold = 0.2;
     params.use_segmentation = false;   // segmentation can cause expansion
     params.scale_lr = 0.0;             // no learning for scale
-    params.number_of_scales = 1;         // only evaluate single scale
+    params.number_of_scales = 1;        // only evaluate single scale
 
 
     tracker_ = cv::TrackerCSRT::create();

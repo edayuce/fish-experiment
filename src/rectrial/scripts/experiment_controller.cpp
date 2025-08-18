@@ -321,7 +321,7 @@ void ControllerNode::drawVisuals(cv::Mat& frame, bool draw_text_overlays) {
                               refuge_pos_.y - refuge_bbox_height_ / 2.0,
                               refuge_bbox_width_, refuge_bbox_height_);
         cv::rectangle(frame, refuge_box, cv::Scalar(255, 255, 255), 2);
-        cv::Point refuge_center(refuge_box.x + refuge_box.width / 2, refuge_box.y + refuge_box.height / 2);
+        cv::Point refuge_center(std::round(refuge_box.x + refuge_box.width / 2), std::round(refuge_box.y + refuge_box.height / 2));
         cv::circle(frame, refuge_center, 4, cv::Scalar(0, 0, 0), -1);
     }
     
