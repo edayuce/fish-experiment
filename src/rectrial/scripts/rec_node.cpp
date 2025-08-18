@@ -135,10 +135,10 @@ void VideoRecorderNode::startRecording()
     recording_start_time_ = ros::Time::now();
     std::string timestamp = getTimestampString();
 
-    std::string raw_path = video_directory_ + "/raw_" + timestamp + ".avi";
-    std::string processed_path = video_directory_ + "/processed_" + timestamp + ".avi";
+    std::string raw_path = video_directory_ + "/raw_" + timestamp + ".mp4";
+    std::string processed_path = video_directory_ + "/processed_" + timestamp + ".mp4";
 
-    int codec = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+    int codec = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
 
     raw_video_writer_.open(raw_path, codec, fps_, frame_size_, true);
     processed_video_writer_.open(processed_path, codec, fps_, frame_size_, true);

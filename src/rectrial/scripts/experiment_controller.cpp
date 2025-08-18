@@ -88,9 +88,15 @@ private:
     cv::Point2f new_pos_;
     int refuge_bbox_width_;
     int refuge_bbox_height_;
+    
     double m_count_per_mm;
     double m_pixels_per_mm;
     double m_amplitude_pixels; // Amplitude for sine waves, now in pixels
+    
+    double home_position_ = 0.0;
+    
+    double m_avg_fish_pos; // Stores the running average of the fish's position
+    double m_avg_alpha;    // The smoothing factor for the running average
 
     // CSV Open Loop
     std::string csv_file_path_;
@@ -138,6 +144,12 @@ ControllerNode::ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     double amp_mm = 10.0;
     pnh_.param<double>("amplitude_mm", amp_mm, 10.0);
     m_amplitude_pixels = amp_mm * m_pixels_per_mm;
+
+    
+    // Load the alpha for the running average filter.
+    // A small value like 0.01 provides smooth averaging.
+    pnh_.param<double>("averaging_alpha", m_avg_alpha, 0.01);
+    m_avg_fish_pos = 0.0; // Initialize average to zero
 
     // --- ROS Communication ---
     experiment_data_pub_ = nh_.advertise<rectrial::pub_data>("imager", 10);
@@ -431,7 +443,7 @@ void ControllerNode::spin()
 
                         if (m_is_filter_enabled) {
 
-                                filtered_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
+                            filtered_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
 
                         }
                         
@@ -448,20 +460,31 @@ void ControllerNode::spin()
                                 } else { new_pos_ = cv::Point2f(0,0); }
                                 break;
                             
-                            case ControlMode::CLOSED_LOOP_GAIN: { // Add braces for local variable scope
-                                // <<< FIX: This is the new, correct closed-loop logic
-                                // 1. Calculate the baseline single sine wave stimulus
+                            case ControlMode::CLOSED_LOOP_GAIN: {
+                                // 1. Update the running average of the fish's position
+                                m_avg_fish_pos = (m_avg_alpha * raw_fish_pos_x) + ((1.0 - m_avg_alpha) * m_avg_fish_pos);
+
+                                // 2. Calculate the fish's deviation from its average (the AC component)
+                                double ac_fish_pos_x = raw_fish_pos_x - m_avg_fish_pos;
+
+                                // 3. Filter this deviation signal if the filter is enabled
+                                double filtered_ac_pos_x = ac_fish_pos_x; // Default to unfiltered
+                                if (m_is_filter_enabled) {
+                                    filtered_ac_pos_x = m_filter_x->measurement(ac_fish_pos_x);
+                                }
+                                
+                                // 4. Calculate the feedback component from the filtered deviation
+                                double feedback_pos = filtered_ac_pos_x * gain_;
+
+                                // 5. Calculate the baseline single sine wave stimulus
                                 double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
                                 double baseline_pos = (m_amplitude_pixels / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
 
-                                // 2. Calculate the feedback component from the fish's position
-                                double feedback_pos = processed_fish_pos.x * gain_;
-
-                                // 3. The new position is the sum of the baseline and the feedback
+                                // 6. The new position is the sum of the baseline and the feedback
                                 new_pos_.x = baseline_pos + feedback_pos;
                                 new_pos_.y = 0;
                                 break;
-                            }
+}
 
                             case ControlMode::SUM_OF_SINES: {
                                 // <<< MODIFIED: This calculation now uses pixel amplitude
@@ -478,6 +501,16 @@ void ControllerNode::spin()
                                 break;
                             }
                         }
+                        
+/*                         double max_displacement_mm = 100.0; // ±10 cm
+                        double displacement_from_home = new_pos_.x - home_position_;
+
+                        if (std::abs(displacement_from_home) > max_displacement_mm) {
+                            ROS_WARN_STREAM("Stopping experiment: Motor exceeded ±10 cm from home ("
+                                            << displacement_from_home << " mm)");
+                            publishCalculatedData(recording_frame, true, raw_fish_pos_x, filtered_fish_pos_x);
+                            new_pos_.x = home_position_;
+                        } */
                         
                         drawVisuals(recording_frame, false); 
                         publishCalculatedData(recording_frame, false, raw_fish_pos_x, filtered_fish_pos_x);
@@ -513,6 +546,8 @@ void ControllerNode::spin()
                         ROS_INFO("Adaptive filter buffer primed with initial fish position.");
                     }
 
+                    m_avg_fish_pos = fish_pos_.x;
+
                 } else if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
                     cv::Mat frame_fish = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
                     drawVisuals(frame_fish, true);
@@ -523,18 +558,6 @@ void ControllerNode::spin()
                 }
              }
         }
-/*         ros::WallDuration elapsed = ros::WallTime::now() - start_time;
-        ros::WallDuration sleep_time = desired_loop_time - elapsed;
-
-        std_msgs::Float64 elapsed_msg;
-        elapsed_msg.data = elapsed.toSec() * 1000.0;
-        elapsed_pub_.publish(elapsed_msg);
-
-        if (sleep_time.toSec() > 0) {
-            sleep_time.sleep();
-        } else {
-            ROS_WARN_THROTTLE(1, "Loop overrun by %.2f ms", -sleep_time.toSec() * 1000);
-        } */
        rate.sleep();
     }
 }

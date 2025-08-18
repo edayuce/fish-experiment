@@ -87,7 +87,7 @@ RefugeTrackerNode::RefugeTrackerNode(ros::NodeHandle& nh)
 
     // --- Setup Subscribers and Publishers ---
     //ros::NodeHandle it(nh_);
-    image_sub_ = nh_.subscribe<rectrial::pub_data>("/imager_c", 1, &RefugeTrackerNode::imageCallback, this);
+    image_sub_ = nh_.subscribe<rectrial::pub_data>("/imager_c", 5, &RefugeTrackerNode::imageCallback, this);
     state_sub_ = nh_.subscribe("/set_state", 10, &RefugeTrackerNode::stateCallback, this);
     
     refuge_data_pub_ = nh_.advertise<rectrial::pub_data>("/refuge_data", 10);
@@ -139,7 +139,7 @@ void RefugeTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Heade
             if (ok)
             {
                 // Draw the bounding box if tracking is successful.
-                cv::rectangle(display_frame, refuge_bbox_, cv::Scalar(255, 0, 0), 2);
+                cv::rectangle(display_frame, refuge_bbox_, cv::Scalar(255, 255, 255), 2);
             }
             else
             {
@@ -148,7 +148,7 @@ void RefugeTrackerNode::processFrame(const cv::Mat& frame, const std_msgs::Heade
             }
 
             cv::Point center(refuge_bbox_.x + refuge_bbox_.width / 2, refuge_bbox_.y + refuge_bbox_.height / 2);
-            cv::circle(display_frame, center, 4, cv::Scalar(0, 255, 0), -1);
+            cv::circle(display_frame, center, 4, cv::Scalar(0, 0, 0), -1);
 
             rectrial::pub_data refuge_msg;
             refuge_msg.image_e = *cv_bridge::CvImage(header, "bgr8", display_frame).toImageMsg();
@@ -190,7 +190,16 @@ void RefugeTrackerNode::initializeRefuge(const cv::Mat& frame)
                                 BBOX_WIDTH_,
                                 BBOX_HEIGHT_);
 
-    tracker_ = cv::TrackerCSRT::create();
+
+    cv::TrackerCSRT::Params params;
+
+    params.psr_threshold = 0.2;
+    params.use_segmentation = false;   // segmentation can cause expansion
+    params.scale_lr = 0.0;             // no learning for scale
+    params.number_of_scales = 1;         // only evaluate single scale
+
+    
+    tracker_ = cv::TrackerCSRT::create(params);
     tracker_->init(frame, refuge_bbox_);
 
     cv::destroyWindow(SELECTION_WINDOW_NAME_);

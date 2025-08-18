@@ -178,6 +178,14 @@ void OnlineTrackerNode::initializeTracker(const cv::Mat& frame) {
     tracking_bbox_ = cv::Rect2d(mouse_params.point.x - (BBOX_WIDTH_ / 2.0),
                                   mouse_params.point.y - (BBOX_HEIGHT_ / 2.0),
                                   BBOX_WIDTH_, BBOX_HEIGHT_);
+
+    cv::TrackerCSRT::Params params;
+    params.psr_threshold = 0.2;
+    params.use_segmentation = false;   // segmentation can cause expansion
+    params.scale_lr = 0.0;             // no learning for scale
+    params.number_of_scales = 1;         // only evaluate single scale
+
+
     tracker_ = cv::TrackerCSRT::create();
     tracker_->init(frame, tracking_bbox_);
 
