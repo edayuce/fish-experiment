@@ -13,8 +13,8 @@ public:
     ThrottlerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     {
         // Get the desired output framerate from the parameter server
-        double rate = 30.0;
-        pnh.param<double>("rate", rate, 30.0);
+        double rate = 25.0;
+        pnh.param<double>("rate", rate, 25.0);
         loop_rate_ = new ros::Rate(rate);
 
         // Publisher for the new, throttled topic

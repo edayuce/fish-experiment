@@ -4,8 +4,6 @@
 #include <stdexcept>
 #include <numeric> // For std::inner_product
 
-// <<< FIX: We no longer need the C++14 complex literals library.
-// using namespace std::complex_literals;
 
 AdaptiveFilter::AdaptiveFilter(double Fs, int N, const std::vector<double>& freqs)
 {

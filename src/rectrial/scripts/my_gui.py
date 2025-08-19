@@ -26,8 +26,8 @@ class MyApp (object):
         # This is the address we setup in the Arduino Program
         self.arduino_address = 0x40
 
-        self.pubMotorFreq = rospy.Publisher('set_motor_freq', String, queue_size=100)
-        self.pubState = rospy.Publisher('set_state', String, queue_size=100)
+        self.pubMotorFreq = rospy.Publisher('set_motor_freq', String, queue_size=10)
+        self.pubState = rospy.Publisher('set_state', String, queue_size=10)
         self.pubFilterState = rospy.Publisher('set_filter_state', Bool, queue_size=10)
         rospy.init_node('interface', anonymous=True)
 
@@ -49,7 +49,7 @@ class MyApp (object):
         set_freq.connect("clicked",self.set_motor_frequency)
 
         self.set_sos = self.builder.get_object("sum_of_sines")
-        self.set_sos.connect("toggled",self.set_sos_frequency)
+        self.set_sos.connect("toggled",self.toggle_sos)
 
         self.set_gain = self.builder.get_object("gain_check")
         self.set_gain.connect("toggled",self.set_reafferent_gain)
@@ -92,8 +92,8 @@ class MyApp (object):
             print("Could not find set_freq button: ", e)
 
         try:
-            self.set_sos = self.builder.get_object("sum_of_sines")
-            self.set_sos.connect("toggled",self.set_sos_frequency)
+            set_sos = self.builder.get_object("sum_of_sines")
+            set_sos.connect("toggled",self.toggle_sos)
         except Exception as e:
             print("Could not find sum_of_sines button: ", e)
 
@@ -151,7 +151,6 @@ class MyApp (object):
             self.pubMotorFreq.publish("gain:"+my_gain)
             #print("gain:"+my_gain)
 
-    
     def openloop(self,button):
         if button.get_active():
             self.pubMotorFreq.publish("openloop")
@@ -162,7 +161,7 @@ class MyApp (object):
     
     def closedloop(self,button):
         if button.get_active():
-            self.pubMotorFreq.publish("closedloop")
+            #self.pubMotorFreq.publish("closedloop")
             text = self.gain_config.get_text().strip()
             my_gain = text.replace(',', '.')
             self.pubMotorFreq.publish("gain:"+my_gain)
@@ -171,7 +170,6 @@ class MyApp (object):
             text = self.freq_config.get_text().strip()
             my_freq = text.replace(',', '.')
             self.pubMotorFreq.publish(my_freq)
-
 
     def toggle_filter(self, button):
         """
@@ -183,13 +181,6 @@ class MyApp (object):
             rospy.loginfo("Adaptive filter ENABLED")
         else:
             rospy.loginfo("Adaptive filter DISABLED")
-
-
-    def track_fish_func(self, widget):
-        self.fish_obj= "fish"
-
-    def track_object_func(self, widget):
-        self.fish_obj= "object"
 
     def StringToBytes(self, val):
         retVal = []
@@ -224,12 +215,24 @@ class MyApp (object):
             my_freq = text.replace(',', '.')
 
             self.pubMotorFreq.publish(my_freq)
+        elif((self.set_closedloop.get_active()) and (self.set_sos.get_active())):
+            self.pubMotorFreq.publish("sos_cl")            
         else:
             self.pubMotorFreq.publish("sum")
     
-    def set_sos_frequency(self,button):
-        if button.get_active():
+    def toggle_sos(self,button):
+        if button.get_active() and self.set_closedloop.get_active():
+            text = self.gain_config.get_text().strip()
+            my_gain = text.replace(',', '.')
+            self.pubMotorFreq.publish("sum_cl_gain:" + my_gain)
+        
+        elif button.get_active:
             self.pubMotorFreq.publish("sum")
+
+        else:
+            text = self.freq_config.get_text().strip()
+            my_freq = text.replace(',', '.')
+            self.pubMotorFreq.publish(my_freq)
 
     def enableMotor(self):
         buffer = "on"

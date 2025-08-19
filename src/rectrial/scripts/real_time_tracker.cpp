@@ -87,7 +87,7 @@ OnlineTrackerNode::OnlineTrackerNode(ros::NodeHandle& nh)
     // --- Setup Subscribers and Publishers ---
     // For real-time tracking, the subscriber queue size should be small
     // to ensure we are always processing the latest available frame.
-    data_sub_ = nh_.subscribe<rectrial::pub_data>("/imager_c", 5, &OnlineTrackerNode::imageCallback, this);
+    data_sub_ = nh_.subscribe<rectrial::pub_data>("/imager_c", 10, &OnlineTrackerNode::imageCallback, this);
     state_sub_ = nh_.subscribe("/set_state", 10, &OnlineTrackerNode::stateCallback, this);
     
     // This publisher will send out the processed image and tracking data.

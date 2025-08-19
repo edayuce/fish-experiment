@@ -88,7 +88,7 @@ RefugeTrackerNode::RefugeTrackerNode(ros::NodeHandle& nh)
 
     // --- Setup Subscribers and Publishers ---
     //ros::NodeHandle it(nh_);
-    image_sub_ = nh_.subscribe<rectrial::pub_data>("/imager_c", 5, &RefugeTrackerNode::imageCallback, this);
+    image_sub_ = nh_.subscribe<rectrial::pub_data>("/imager_c", 10, &RefugeTrackerNode::imageCallback, this);
     state_sub_ = nh_.subscribe("/set_state", 10, &RefugeTrackerNode::stateCallback, this);
     
     refuge_data_pub_ = nh_.advertise<rectrial::pub_data>("/refuge_data", 10);

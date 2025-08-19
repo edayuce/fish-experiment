@@ -1,11 +1,11 @@
-//this is old basler_camera.cpp file
-
+// updated basler_camera.cpp
 
 #include <ros/ros.h>
 #include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.h>
 #include <opencv2/opencv.hpp>
+#include <std_msgs/Float64.h>
 
 // Include the Pylon API
 #include <pylon/PylonIncludes.h>
@@ -18,9 +18,6 @@
 // Use the Pylon namespace
 using namespace Pylon;
 
-// Use the C++ standard namespace
-using namespace std;
-
 class BaslerCameraNode
 {
 public:
@@ -29,66 +26,10 @@ public:
     void spin();
 
 private:
-    // This class handles the image grabbing event from the camera.
-    class ImageEventHandler : public CImageEventHandler
-    {
-    public:
-        // The node is passed to the handler so it can access the publisher.
-        ImageEventHandler(BaslerCameraNode* node) : node_(node) {}
-
-        // This method is called by the Pylon SDK whenever a new image is available.
-        virtual void OnImageGrabbed(CInstantCamera& camera, const CGrabResultPtr& ptrGrabResult)
-        {
-            if (ptrGrabResult->GrabSucceeded())
-            {
-                // Create a cv::Mat to hold the image data.
-                // CV_8UC1 is for a single-channel 8-bit image (grayscale).
-                cv::Mat image_mat(ptrGrabResult->GetHeight(), ptrGrabResult->GetWidth(), CV_8UC1);
-
-                // Copy the image data from the Pylon buffer to the cv::Mat.
-                memcpy(image_mat.ptr(), ptrGrabResult->GetBuffer(), ptrGrabResult->GetPayloadSize());
-
-                // --- Create and populate the custom message ---
-                rectrial::pub_data msg;
-
-                // 1. Populate the image field (image_p)
-                std_msgs::Header header; // Create a header
-                header.stamp = ros::Time::now();
-                header.frame_id = node_->frame_id_;
-                
-                // Convert the cv::Mat to a sensor_msgs::Image message
-                sensor_msgs::ImagePtr image_msg = cv_bridge::CvImage(header, "mono8", image_mat).toImageMsg();
-                msg.image_p = *image_msg;
-
-                // 2. Populate the data field (data_e) with a high-resolution timestamp
-                auto nanosec_since_epoch = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                msg.data_e = std::to_string(nanosec_since_epoch);      
-
-                // The other fields (finish_c, video_name_p, image_e) are left empty,
-                // as they are intended to be filled by downstream nodes.
-
-                // Publish the custom message.
-                node_->data_pub_.publish(msg);
-            }
-            else
-            {
-                ROS_ERROR_STREAM("Pylon image grab failed: " << ptrGrabResult->GetErrorCode() << " " << ptrGrabResult->GetErrorDescription());
-            }
-        }
-    private:
-        BaslerCameraNode* node_;
-    };
-
-    // ROS NodeHandle
     ros::NodeHandle nh_;
-
-    // A standard ROS publisher for our custom message type
     ros::Publisher data_pub_;
-
-    // Pylon camera object
+    ros::Publisher loop_time_pub_; 
     CInstantCamera camera_;
-
-    // Parameters
     std::string frame_id_;
 };
 
@@ -106,32 +47,33 @@ BaslerCameraNode::BaslerCameraNode(ros::NodeHandle& nh)
     try
     {
         // --- Setup Publisher ---
-        // Publish the custom message to the '/imager_c' topic
         data_pub_ = nh_.advertise<rectrial::pub_data>("/imager_c", 10);
+        loop_time_pub_ = nh_.advertise<std_msgs::Float64>("/camera_trigger_interval", 10);
 
-        // --- Create and Camera ---
+        // --- Create and Attach Camera ---
         camera_.Attach(CTlFactory::GetInstance().CreateFirstDevice());
         ROS_INFO("Using device: %s", camera_.GetDeviceInfo().GetModelName().c_str());
         
-        // --- Register Event Handler ---
-        camera_.RegisterImageEventHandler(new ImageEventHandler(this), RegistrationMode_ReplaceAll, Cleanup_Delete);
-
         // Open Camera
         camera_.Open();
 
-        // --- Configure Camera ---
+        // --- Configure Camera for Software Trigger ---
         GenApi::INodeMap& nodemap = camera_.GetNodeMap();
         CEnumParameter(nodemap, "TriggerSelector").SetValue("FrameStart");
-        CEnumParameter(nodemap, "TriggerMode").SetValue("Off"); // 'Off' for continuous/freerun
+        // Turn TriggerMode ON
+        CEnumParameter(nodemap, "TriggerMode").SetValue("On");
+        // Set the trigger source to Software
+        CEnumParameter(nodemap, "TriggerSource").SetValue("Software");
         CEnumParameter(nodemap, "AcquisitionMode").SetValue("Continuous");
 
         // --- Start Grabbing ---
-        camera_.StartGrabbing(GrabStrategy_LatestImageOnly, GrabLoop_ProvidedByInstantCamera);
-        ROS_INFO("Camera is now grabbing continuously and publishing to /imager_c.");
+        // The camera is now waiting for software triggers.
+        camera_.StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByUser);
+        ROS_INFO("Camera is now configured for software trigger mode.");
     }
     catch (const GenericException& e)
     {
-        ROS_FATAL_STREAM("An exception occurred in the Pylon camera node: " << e.GetDescription());
+        ROS_FATAL_STREAM("An exception occurred during Pylon setup: " << e.GetDescription());
         ros::shutdown();
     }
 }
@@ -155,7 +97,82 @@ BaslerCameraNode::~BaslerCameraNode()
 
 void BaslerCameraNode::spin()
 {
-    ros::spin();
+    // --- High-Precision Timer Setup ---
+    // Use steady_clock for monotonic time, which is best for timing loops.
+    auto lastTimeTarget = std::chrono::steady_clock::now();
+    // 40ms in nanoseconds
+    const auto interval = std::chrono::nanoseconds(40000000); 
+    auto timeTarget = lastTimeTarget + interval;
+
+    CGrabResultPtr ptrGrabResult;
+    auto lastGrabTime = std::chrono::steady_clock::now();
+
+    while (ros::ok())
+    {
+        // --- 1. Wait for the precise 40ms interval ---
+        // This is a "busy-wait" loop for maximum precision.
+        while (std::chrono::steady_clock::now() < timeTarget) {
+            // Do nothing, just wait.
+        }
+
+        try
+        {
+            // --- 2. Trigger and Retrieve the Image ---
+            if (camera_.IsGrabbing()) {
+                // Send the software trigger command to the camera
+                camera_.ExecuteSoftwareTrigger();
+
+                // Wait for the grab result, with a timeout (e.g., 500ms)
+                if (camera_.RetrieveResult(500, ptrGrabResult, TimeoutHandling_ThrowException))
+                {
+                    if (ptrGrabResult->GrabSucceeded())
+                    {
+                        
+                        auto now = std::chrono::steady_clock::now();
+                        auto delta_t = std::chrono::duration_cast<std::chrono::nanoseconds>(now - lastGrabTime);
+                        lastGrabTime = now;
+                        
+                        std_msgs::Float64 time_msg;
+                        time_msg.data = delta_t.count() / 1e6; // Convert nanoseconds to milliseconds
+                        loop_time_pub_.publish(time_msg);
+
+                        // --- 3. Process and Publish the Image ---
+                        cv::Mat image_mat(ptrGrabResult->GetHeight(), ptrGrabResult->GetWidth(), CV_8UC1);
+                        memcpy(image_mat.ptr(), ptrGrabResult->GetBuffer(), ptrGrabResult->GetPayloadSize());
+
+                        rectrial::pub_data msg;
+                        std_msgs::Header header;
+                        header.stamp = ros::Time::now();
+                        header.frame_id = frame_id_;
+                        
+                        sensor_msgs::ImagePtr image_msg = cv_bridge::CvImage(header, "mono8", image_mat).toImageMsg();
+                        msg.image_e = *image_msg; // <<< IMPORTANT: Put image in the correct field
+                        msg.image_p = *image_msg; // Also put in the old field for compatibility
+
+                        auto nanosec_since_epoch = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                        msg.data_e = std::to_string(nanosec_since_epoch);
+
+                        data_pub_.publish(msg);
+                    }
+                    else
+                    {
+                        ROS_ERROR_STREAM("Pylon image grab failed: " << ptrGrabResult->GetErrorCode() << " " << ptrGrabResult->GetErrorDescription());
+                    }
+                }
+            }
+        }
+        catch (const GenericException& e)
+        {
+            ROS_ERROR_STREAM("An exception occurred while grabbing: " << e.GetDescription());
+        }
+
+        // --- 4. Schedule the next trigger time ---
+        lastTimeTarget = timeTarget;
+        timeTarget = timeTarget + interval;
+        
+        // --- 5. Handle ROS events ---
+        ros::spinOnce();
+    }
 }
 
 int main(int argc, char** argv)
@@ -164,7 +181,7 @@ int main(int argc, char** argv)
     ros::NodeHandle nh("~");
 
     BaslerCameraNode node(nh);
-    node.spin();
+    node.spin(); // This now contains our high-precision loop
 
     return 0;
 }

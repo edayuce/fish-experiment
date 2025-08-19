@@ -26,7 +26,7 @@ private:
     // We now have two separate callbacks
     void fishCallback(const rectrial::pub_data::ConstPtr& msg);
     void refugeCallback(const rectrial::pub_data::ConstPtr& msg);
-    //void elapsedCallback(const std_msgs::Float64::ConstPtr& msg);
+    void loopTimeCallback(const std_msgs::Float64::ConstPtr& msg);
 
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void tryLogData(); // The new function to handle logging
@@ -36,6 +36,9 @@ private:
     ros::Subscriber state_sub_;
     ros::Subscriber fish_sub_;
     ros::Subscriber static_refuge_sub_;
+    
+    ros::Subscriber loop_time_sub_;
+    double last_camera_loop_time_ms_ = 0.0;
     //ros::Subscriber elapsed_ms_sub_;
 
     // Member variables to store the latest message from each topic
@@ -71,9 +74,8 @@ DataLoggerNode::DataLoggerNode(ros::NodeHandle& nh) : nh_(nh)
     fish_sub_ = nh_.subscribe("/imager", 10, &DataLoggerNode::fishCallback, this); // Listen to the final controller output
     static_refuge_sub_ = nh_.subscribe("/refuge_data", 10, &DataLoggerNode::refugeCallback, this);
     state_sub_ = nh_.subscribe("/set_state", 10, &DataLoggerNode::stateCallback, this);
-    //elapsed_ms_sub_ = nh_.subscribe("/loop_elapsed_time", 10, &DataLoggerNode::elapsedCallback, this);
+    loop_time_sub_ = nh_.subscribe("/camera_trigger_interval", 10, &DataLoggerNode::loopTimeCallback, this);
 
-    
     ROS_INFO("Data Logger node initialized. Waiting for data from both topics...");
 }
 
@@ -93,11 +95,11 @@ void DataLoggerNode::refugeCallback(const rectrial::pub_data::ConstPtr& msg)
     tryLogData(); // Attempt to log after receiving refuge data
 }
 
-/* void DataLoggerNode::elapsedCallback(const std_msgs::Float64::ConstPtr& msg) {
-    elapsed_ms = msg->data;
-    has_new_time_data_ = true;
-    tryLogData();
-} */
+void DataLoggerNode::loopTimeCallback(const std_msgs::Float64::ConstPtr& msg)
+{
+    // Simply store the latest time received from the camera
+    last_camera_loop_time_ms_ = msg->data;
+}
 
 void DataLoggerNode::tryLogData()
 {
@@ -106,7 +108,7 @@ void DataLoggerNode::tryLogData()
     }
 
     ROS_INFO_ONCE("First data pair received. Logging started.");
-
+/* 
     ros::Time current_time = ros::Time::now();
     double loop_duration_ms = 0.0;
     if (!first_message_) {
@@ -114,7 +116,7 @@ void DataLoggerNode::tryLogData()
         loop_duration_ms = delta_t.toSec() * 1000.0;
     }
     last_loop_time_ = current_time;
-    first_message_ = false;
+    first_message_ = false; */
 
     // <<< FIX: Parse the new, more complex data string
     std::string fish_data_str = last_fish_msg_->data_e;
@@ -136,7 +138,7 @@ void DataLoggerNode::tryLogData()
         log_file_ << raw_pos_part << ","         // raw_fish_x
                   << filtered_pos_part << ","    // filtered_fish_x
                   << refuge_data_x << ","
-                  << std::fixed << std::setprecision(4) << loop_duration_ms << "\n";   
+                  << std::fixed << std::setprecision(4) << last_camera_loop_time_ms_ << "\n";   
     }
 
     has_new_fish_data_ = false;

@@ -3,7 +3,6 @@
 #include <ros/ros.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Bool.h>
-#include <std_msgs/Float64.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.h>
 #include <sensor_msgs/image_encodings.h>
@@ -12,7 +11,7 @@
 #include <geometry_msgs/PointStamped.h>
 
 #include <memory>
-#include <fstream> // For CSV file reading
+#include <fstream>
 
 #include "adaptive_filter.h"
 #include "rectrial/pub_data.h"
@@ -30,7 +29,7 @@ namespace ExperimentController
 {
 
 enum class NodeState { WAITING_FOR_DATA, WAITING_FOR_START, EXPERIMENT_RUNNING, EXPERIMENT_DONE };
-enum class ControlMode { CLOSED_LOOP_GAIN, OPEN_LOOP, SUM_OF_SINES, FIXED_FREQ, INACTIVE };
+enum class ControlMode { CLOSED_LOOP_GAIN, OPEN_LOOP, SUM_OF_SINES, SUM_OF_SINES_CL, FIXED_FREQ, INACTIVE };
 
 class ControllerNode
 {
@@ -42,7 +41,6 @@ public:
 private:
     // Callbacks
     void fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
-    //void refugeStateCallback(const geometry_msgs::PointStamped::ConstPtr& msg);
     void refugeTrackerCallback(const rectrial::pub_data::ConstPtr& msg);
     void stateCallback(const std_msgs::String::ConstPtr& msg);
     void motorCommandCallback(const std_msgs::String::ConstPtr& msg);
@@ -50,7 +48,7 @@ private:
 
     // Core Logic
     void publishCalculatedData(const cv::Mat& final_frame, bool is_stopping, double raw_pos, double filtered_pos);
-    void drawVisuals(cv::Mat& frame, bool draw_text_overlays);
+    void drawVisuals(cv::Mat& frame, bool draw_text_overlays, std::string mode);
     std::string getCurrentTimestamp();
     std::string controlModeToString();
     cv::Point2f parsePosition(const std::string& data);
@@ -62,7 +60,6 @@ private:
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
     ros::Publisher experiment_data_pub_;
-    //ros::Publisher elapsed_pub_;
     ros::Subscriber fish_tracker_sub_;
     ros::Subscriber refuge_state_sub_;
     ros::Subscriber state_sub_;
@@ -89,24 +86,17 @@ private:
     int refuge_bbox_width_;
     int refuge_bbox_height_;
     
-    double m_count_per_mm;
     double m_pixels_per_mm;
-    double m_amplitude_pixels; // Amplitude for sine waves, now in pixels
+    double m_amplitude_pixels;
     
-    double home_position_ = 0.0;
-    
-    double m_avg_fish_pos; // Stores the running average of the fish's position
-    double m_avg_alpha;    // The smoothing factor for the running average
+    double m_avg_fish_pos;
+    double m_avg_alpha;
 
-    // CSV Open Loop
     std::string csv_file_path_;
     std::vector<double> csv_positions_;
     int csv_index_ = 0;
 
-    // Sine Wave Calculation
-    double a_pos_ = 0.0; // Amplitude in motor counts
-    std::chrono::steady_clock::time_point trial_start_time_;
-    // <<< NEW: ROS-based timer for the experiment duration
+    std::chrono::steady_clock::time_point trial_start_time_chrono_;
     ros::Time trial_start_time_ros_;
 
     GLWindow* gl_window_ = nullptr;
@@ -154,7 +144,7 @@ ControllerNode::ControllerNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     // --- ROS Communication ---
     experiment_data_pub_ = nh_.advertise<rectrial::pub_data>("imager", 10);
     //elapsed_pub_= nh.advertise<std_msgs::Float64>("loop_elapsed_time", 10);
-    fish_tracker_sub_ = nh_.subscribe("/imager_processed", 5, &ControllerNode::fishTrackerCallback, this);
+    fish_tracker_sub_ = nh_.subscribe("/imager_processed", 10, &ControllerNode::fishTrackerCallback, this);
     refuge_state_sub_ = nh_.subscribe("/refuge_data", 5, &ControllerNode::refugeTrackerCallback, this);
     state_sub_ = nh_.subscribe("set_state", 10, &ControllerNode::stateCallback, this);
     motor_command_sub_ = nh_.subscribe("set_motor_freq", 10, &ControllerNode::motorCommandCallback, this);
@@ -222,17 +212,150 @@ cv::Point2f ControllerNode::parsePosition(const std::string& data) {
     return pos;
 }
 
-// Callback for data from the OnlineTrackerNode (fish)
 void ControllerNode::fishTrackerCallback(const rectrial::pub_data::ConstPtr& msg)
 {
-
+    // 1. Store the latest data
     last_fish_tracker_msg_ = msg;
     fish_pos_ = parsePosition(msg->data_e);
     if (!has_fish_data_) {
         has_fish_data_ = true;
         ROS_INFO("Received first data packet from fish tracker.");
+        // Transition to ready state as soon as we have data
+        if (node_state_ == NodeState::WAITING_FOR_DATA) {
+            node_state_ = NodeState::WAITING_FOR_START;
+        }
     }
 
+    // 2. Perform all processing for this frame
+    try {
+        cv::Mat recording_frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
+        if (!recording_frame.empty()) {
+            cv::Mat display_frame = recording_frame.clone();
+            if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
+                
+                // --- Timer and Limit Checks ---
+                if ((ros::Time::now() - trial_start_time_ros_).toSec() >= 60.0) {
+                    ROS_INFO("Experiment time limit (60s) reached. Stopping automatically.");
+                    drawVisuals(recording_frame, false, "");
+                    publishCalculatedData(recording_frame, true, 0, 0);
+                    node_state_ = NodeState::EXPERIMENT_DONE;
+                    //continue; 
+                }
+                const double limit_mm = 100.0;
+                const double limit_pixels = limit_mm * m_pixels_per_mm;
+                if (std::abs(new_pos_.x) > limit_pixels) {
+                    ROS_WARN("Position limit (%.1f cm) exceeded! Halting experiment.", limit_mm / 10.0);
+                    drawVisuals(recording_frame, false, "");
+                    publishCalculatedData(recording_frame, true, 0, 0);
+                    node_state_ = NodeState::EXPERIMENT_DONE;
+                    return; // Stop processing this frame
+                }
+
+                // --- Calculation Logic ---
+                double raw_fish_pos_x = fish_pos_.x;
+                double filtered_fish_pos_x = raw_fish_pos_x;
+                if (m_is_filter_enabled) {
+                    filtered_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
+                }
+                cv::Point2f processed_fish_pos(filtered_fish_pos_x, fish_pos_.y);
+
+                switch (control_mode_) {
+                    case ControlMode::OPEN_LOOP:
+                        if (!csv_positions_.empty()) {
+                            // <<< MODIFIED: Convert position from mm (in CSV) to pixels
+                            double position_mm = csv_positions_[csv_index_];
+                            new_pos_.x = position_mm * m_pixels_per_mm;
+                            new_pos_.y = 0;
+                            csv_index_ = (csv_index_ + 1) % csv_positions_.size();
+                        } else { new_pos_ = cv::Point2f(0,0); }
+                        break;
+                    
+                    case ControlMode::CLOSED_LOOP_GAIN: {
+                        // 1. Update the running average of the fish's position
+                        m_avg_fish_pos = (m_avg_alpha * raw_fish_pos_x) + ((1.0 - m_avg_alpha) * m_avg_fish_pos);
+
+                        // 2. Calculate the fish's deviation from its average (the AC component)
+                        double ac_fish_pos_x = raw_fish_pos_x - m_avg_fish_pos;
+
+                        // 3. Filter this deviation signal if the filter is enabled
+                        double filtered_ac_pos_x = ac_fish_pos_x; // Default to unfiltered
+                        if (m_is_filter_enabled) {
+                            filtered_ac_pos_x = m_filter_x->measurement(ac_fish_pos_x);
+                        }
+                        
+                        // 4. Calculate the feedback component from the filtered deviation
+                        double feedback_pos = filtered_ac_pos_x * gain_;
+
+                        // 5. Calculate the baseline single sine wave stimulus
+                        double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_chrono_).count();
+                        double baseline_pos = (m_amplitude_pixels / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
+
+                        // 6. The new position is the sum of the baseline and the feedback
+                        new_pos_.x = baseline_pos + feedback_pos;
+                        new_pos_.y = 0;
+                        break;
+                    }
+
+                    case ControlMode::SUM_OF_SINES: {
+                        gain_ = 0.0;
+                        // <<< MODIFIED: This calculation now uses pixel amplitude
+                        double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_chrono_).count();
+                        new_pos_.x = calculateSumOfSines(time_ms); // This function is now pixel-based
+                        new_pos_.y = 0;
+                        break;
+                    }
+
+                    case ControlMode::SUM_OF_SINES_CL: {
+
+                        m_avg_fish_pos = (m_avg_alpha * raw_fish_pos_x) + ((1.0 - m_avg_alpha) * m_avg_fish_pos);
+
+                        // 2. Calculate the fish's deviation from its average (the AC component)
+                        double ac_fish_pos_x = raw_fish_pos_x - m_avg_fish_pos;
+
+                        // 3. Filter this deviation signal if the filter is enabled
+                        double filtered_ac_pos_x = ac_fish_pos_x; // Default to unfiltered
+                        if (m_is_filter_enabled) {
+                            filtered_ac_pos_x = m_filter_x->measurement(ac_fish_pos_x);
+                        }
+                        
+                        // 4. Calculate the feedback component from the filtered deviation
+                        double feedback_pos = filtered_ac_pos_x * gain_;
+                        
+                        // 5. Calculate the baseline single sine wave stimulus
+                        double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_chrono_).count();
+                        double baseline_pos = calculateSumOfSines(time_ms);
+
+                        // 6. The new position is the sum of the baseline and the feedback
+                        new_pos_.x = baseline_pos + feedback_pos;
+                        new_pos_.y = 0;
+                        break;
+                    }
+
+                    case ControlMode::FIXED_FREQ: {
+                        gain_ = 0.0;
+                        // <<< MODIFIED: This calculation now uses pixel amplitude
+                        double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_chrono_).count();
+                        new_pos_.x = (m_amplitude_pixels / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
+                        new_pos_.y = 0;
+                        break;
+                    }
+                }
+                
+                drawVisuals(recording_frame, true, controlModeToString()); 
+                publishCalculatedData(recording_frame, false, raw_fish_pos_x, filtered_fish_pos_x);
+                prev_pos_ = new_pos_;
+                frame_counter_++;
+            }
+            
+            // 3. Update the live display
+            drawVisuals(display_frame, true, controlModeToString());
+            if (gl_window_) {
+                gl_window_->updateImage(display_frame.ptr(0), display_frame.cols, display_frame.rows, GL_BGR);
+            }
+        }
+    } catch (const cv_bridge::Exception& e) {
+        ROS_ERROR("cv_bridge exception: %s", e.what());
+    }
 }
 
 // NEW Callback for data from the RefugeTrackerNode
@@ -263,7 +386,25 @@ void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg)
     std::string cmd = msg->data;
     std::vector<double> freqs_to_set; // Create a list for the new frequencies
 
-    if (cmd == "sum") {
+    if (cmd.rfind("sum_cl_gain:", 0) == 0) {
+        
+        control_mode_ = ControlMode::SUM_OF_SINES_CL;
+        ROS_INFO("Set mode to SUM_OF_SINES_CL");
+
+        try {
+            // This line correctly parses the gain value from the string
+            gain_ = std::stod(cmd.substr(12));
+            ROS_INFO("Gain set to: %.2f", gain_);
+        } catch (const std::exception& e) {
+            ROS_ERROR("Failed to parse gain value from command: %s", cmd.c_str());
+        }
+        
+        static const double sum_freqs[13] = {0.1, 0.15, 0.25, 0.35, 0.55, 0.65, 0.85, 0.95, 1.15, 1.45, 1.55, 1.85, 2.05};
+        freqs_to_set.assign(sum_freqs, sum_freqs + 13);
+        ROS_INFO("Filter updated to suppress all 13 Sum-of-Sines frequencies.");
+        
+    
+    } else if (cmd == "sum") {
         
         control_mode_ = ControlMode::SUM_OF_SINES;
         ROS_INFO("Set mode to SUM_OF_SINES");
@@ -273,7 +414,9 @@ void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg)
         ROS_INFO("Filter updated to suppress all 13 Sum-of-Sines frequencies.");
         
     
-    } else if (cmd == "openloop") {
+    }
+     
+    else if (cmd == "openloop") {
         
         control_mode_ = ControlMode::OPEN_LOOP;
         ROS_INFO("Set mode to OPEN_LOOP");
@@ -282,7 +425,7 @@ void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg)
         if (!csv_file_path_.empty()) loadCsvFile(csv_file_path_);
 
     
-    } else if (cmd == "closedloop" || cmd.rfind("gain:", 0) == 0) {
+    } else if (cmd.rfind("gain:", 0) == 0) {
         control_mode_ = ControlMode::CLOSED_LOOP_GAIN;
 
         try {
@@ -314,7 +457,7 @@ void ControllerNode::motorCommandCallback(const std_msgs::String::ConstPtr& msg)
 }
 
 // Draws the current state and data onto the image for display.
-void ControllerNode::drawVisuals(cv::Mat& frame, bool draw_text_overlays) {
+void ControllerNode::drawVisuals(cv::Mat& frame, bool draw_text_overlays, std::string mode) {
     // --- Part 1: Always draw the tracking boxes ---
     if(has_refuge_data_) {
         cv::Rect2d refuge_box(refuge_pos_.x - refuge_bbox_width_ / 2.0,
@@ -339,7 +482,7 @@ void ControllerNode::drawVisuals(cv::Mat& frame, bool draw_text_overlays) {
                 break;
             case NodeState::EXPERIMENT_RUNNING:
                 ss << std::fixed << std::setprecision(2)
-                   << "Mode: " << controlModeToString() << " | Gain: " << gain_ 
+                   << "Mode: " << mode << " | Gain: " << gain_ 
                    << " | Fish: (" << (int)fish_pos_.x << ", " << (int)fish_pos_.y << ")";
                 cv::putText(frame, ss.str(), cv::Point(25, 50), cv::FONT_HERSHEY_SIMPLEX, 0.6, CV_RGB(50, 255, 50), 2);
                 cv::putText(frame, "Frame: " + std::to_string(frame_counter_), cv::Point(25, 90), cv::FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2);
@@ -404,129 +547,24 @@ std::string ControllerNode::controlModeToString()
         case ControlMode::OPEN_LOOP:        return "OpenLoop";
         case ControlMode::FIXED_FREQ:       return "FixedFreq";
         case ControlMode::SUM_OF_SINES:     return "SumOfSines";
+        case ControlMode::SUM_OF_SINES_CL:  return "SumOfSinesClosedLoop";
         default:                            return "Unknown";
     }
 }
 
 void ControllerNode::spin()
 {
-    //ros::WallDuration desired_loop_time(0.04);
-    ros::Rate rate(30);
+    // Use a simple, reliable rate for the main loop.
+    // This loop's only jobs are to handle GUI events and call spinOnce.
+    ros::Rate rate(60); 
+
     while (ros::ok())
     {
-        //ros::WallTime start_time = ros::WallTime::now();
+        // This processes all incoming ROS messages, triggering the
+        // fishTrackerCallback which contains all our processing logic.
         ros::spinOnce();
-        if (node_state_ == NodeState::WAITING_FOR_DATA && has_fish_data_) {
-            node_state_ = NodeState::WAITING_FOR_START;
-        }
 
-        if (last_fish_tracker_msg_) {
-            try {
-                cv::Mat recording_frame = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
-                if (!recording_frame.empty()) {
-                    cv::Mat display_frame = recording_frame.clone();
-                    if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
-
-                        if ((ros::Time::now() - trial_start_time_ros_).toSec() >= 60.0) {
-                            ROS_INFO("Experiment time limit (60s) reached. Stopping automatically.");
-                            drawVisuals(recording_frame, false);
-                            publishCalculatedData(recording_frame, true, 0,0); // Publish "end" message
-                            node_state_ = NodeState::EXPERIMENT_DONE;
-                            // Use 'continue' to skip the rest of this loop iteration
-                            // and prevent a double-stop if space is pressed simultaneously.
-                            continue; 
-                        }
-                        
-                        // --- Centralized Calculation Logic ---
-                        double raw_fish_pos_x = fish_pos_.x;
-                        double filtered_fish_pos_x = raw_fish_pos_x; // Default to raw if filter is off
-
-                        if (m_is_filter_enabled) {
-
-                            filtered_fish_pos_x = m_filter_x->measurement(raw_fish_pos_x);
-
-                        }
-                        
-                        cv::Point2f processed_fish_pos(filtered_fish_pos_x, fish_pos_.y);
-
-                        switch (control_mode_) {
-                            case ControlMode::OPEN_LOOP:
-                                if (!csv_positions_.empty()) {
-                                    // <<< MODIFIED: Convert position from mm (in CSV) to pixels
-                                    double position_mm = csv_positions_[csv_index_];
-                                    new_pos_.x = position_mm * m_pixels_per_mm;
-                                    new_pos_.y = 0;
-                                    csv_index_ = (csv_index_ + 1) % csv_positions_.size();
-                                } else { new_pos_ = cv::Point2f(0,0); }
-                                break;
-                            
-                            case ControlMode::CLOSED_LOOP_GAIN: {
-                                // 1. Update the running average of the fish's position
-                                m_avg_fish_pos = (m_avg_alpha * raw_fish_pos_x) + ((1.0 - m_avg_alpha) * m_avg_fish_pos);
-
-                                // 2. Calculate the fish's deviation from its average (the AC component)
-                                double ac_fish_pos_x = raw_fish_pos_x - m_avg_fish_pos;
-
-                                // 3. Filter this deviation signal if the filter is enabled
-                                double filtered_ac_pos_x = ac_fish_pos_x; // Default to unfiltered
-                                if (m_is_filter_enabled) {
-                                    filtered_ac_pos_x = m_filter_x->measurement(ac_fish_pos_x);
-                                }
-                                
-                                // 4. Calculate the feedback component from the filtered deviation
-                                double feedback_pos = filtered_ac_pos_x * gain_;
-
-                                // 5. Calculate the baseline single sine wave stimulus
-                                double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
-                                double baseline_pos = (m_amplitude_pixels / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
-
-                                // 6. The new position is the sum of the baseline and the feedback
-                                new_pos_.x = baseline_pos + feedback_pos;
-                                new_pos_.y = 0;
-                                break;
-}
-
-                            case ControlMode::SUM_OF_SINES: {
-                                // <<< MODIFIED: This calculation now uses pixel amplitude
-                                double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
-                                new_pos_.x = calculateSumOfSines(time_ms); // This function is now pixel-based
-                                new_pos_.y = 0;
-                                break;
-                            }
-                            case ControlMode::FIXED_FREQ: {
-                                // <<< MODIFIED: This calculation now uses pixel amplitude
-                                double time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - trial_start_time_).count();
-                                new_pos_.x = (m_amplitude_pixels / (2.0 * M_PI * fixed_frequency_)) * sin(2.0 * M_PI * fixed_frequency_ * time_ms / 1000.0);
-                                new_pos_.y = 0;
-                                break;
-                            }
-                        }
-                        
-/*                         double max_displacement_mm = 100.0; // ±10 cm
-                        double displacement_from_home = new_pos_.x - home_position_;
-
-                        if (std::abs(displacement_from_home) > max_displacement_mm) {
-                            ROS_WARN_STREAM("Stopping experiment: Motor exceeded ±10 cm from home ("
-                                            << displacement_from_home << " mm)");
-                            publishCalculatedData(recording_frame, true, raw_fish_pos_x, filtered_fish_pos_x);
-                            new_pos_.x = home_position_;
-                        } */
-                        
-                        drawVisuals(recording_frame, false); 
-                        publishCalculatedData(recording_frame, false, raw_fish_pos_x, filtered_fish_pos_x);
-                        prev_pos_ = new_pos_;
-                        
-                        frame_counter_++;
-                    }
-                    drawVisuals(display_frame, true);
-
-                    if (gl_window_) {
-                        gl_window_->updateImage(display_frame.ptr(0), display_frame.cols, display_frame.rows, GL_BGR);
-                    }
-                }
-            } catch (const cv_bridge::Exception& e) { ROS_ERROR("cv_bridge exception: %s", e.what()); }
-        } 
-        
+        // This loop continuously checks for keyboard and window events for the live display.
         SDL_Event sdl_event;
         while (SDL_PollEvent(&sdl_event)) {
              if (sdl_event.type == SDL_KEYUP && sdl_event.key.keysym.scancode == SDL_SCANCODE_SPACE) {
@@ -535,23 +573,19 @@ void ControllerNode::spin()
                     frame_counter_ = 0;
                     csv_index_ = 0;
                     prev_pos_ = refuge_pos_;
-                    new_pos_ = cv::Point2f(0.0f, 0.0f);
                     experiment_id_ = getCurrentTimestamp();
-                    trial_start_time_ = std::chrono::steady_clock::now();
-                    // <<< NEW: Record the ROS time when the experiment starts
+                    trial_start_time_chrono_ = std::chrono::steady_clock::now();
                     trial_start_time_ros_ = ros::Time::now();
-
                     if (m_filter_x) {
                         m_filter_x->primeBuffer(fish_pos_.x);
-                        ROS_INFO("Adaptive filter buffer primed with initial fish position.");
                     }
-
                     m_avg_fish_pos = fish_pos_.x;
-
                 } else if (node_state_ == NodeState::EXPERIMENT_RUNNING) {
-                    cv::Mat frame_fish = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
-                    drawVisuals(frame_fish, true);
-                    publishCalculatedData(frame_fish, true, 0, 0);
+                    if (last_fish_tracker_msg_) {
+                        cv::Mat frame_fish = cv_bridge::toCvShare(last_fish_tracker_msg_->image_e, last_fish_tracker_msg_, "bgr8")->image.clone();
+                        drawVisuals(frame_fish, false, controlModeToString());
+                        publishCalculatedData(frame_fish, true, 0, 0);
+                    }
                     node_state_ = NodeState::EXPERIMENT_DONE;
                 } else if (node_state_ == NodeState::EXPERIMENT_DONE) {
                     node_state_ = NodeState::WAITING_FOR_START;
