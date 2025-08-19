@@ -16,7 +16,6 @@ Before you begin, ensure you have the following installed:
     sudo apt-get update
     sudo apt-get install python3-gi gir1.2-gtk-3.0
     ```
-    ```
 *   **SMbus:** For I2C communication.
     ```bash
     sudo apt-get install python3-smbus
